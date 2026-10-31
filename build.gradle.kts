@@ -27,11 +27,12 @@ metro {
 
 ktfmt { googleStyle() }
 
+compose.resources { packageOfResClass = "app.viki.resources" }
+
 dependencies {
   implementation(compose.desktop.currentOs)
-  implementation(compose.material3)
-  implementation(compose.materialIconsExtended)
-  implementation(compose.components.resources)
+  implementation(libs.compose.material3)
+  implementation(libs.compose.components.resources)
 
   implementation(libs.circuit.foundation)
   implementation(libs.circuit.codegen.annotations)

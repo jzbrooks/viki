@@ -1,4 +1,5 @@
 [versions]
+compose-material3 = "1.9.0"
 kotlin = "2.4.20"
 compose = "1.12.2"
 metro = "1.5.1"
@@ -8,6 +9,9 @@ junit = "5.11.4"
 ktfmt-gradle = "0.27.0"
 
 [libraries]
+compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
+compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose" }
+
 circuit-foundation = { module = "com.slack.circuit:circuit-foundation", version.ref = "circuit" }
 circuit-codegen-annotations = { module = "com.slack.circuit:circuit-codegen-annotations", version.ref = "circuit" }
 circuit-overlay = { module = "com.slack.circuit:circuit-overlay", version.ref = "circuit" }

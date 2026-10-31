@@ -19,11 +19,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -47,6 +42,11 @@ import androidx.compose.ui.unit.dp
 import app.viki.avd.DeviceFormFactor
 import app.viki.avd.DevicePreset
 import app.viki.di.AppScope
+import app.viki.resources.Res
+import app.viki.resources.arrow_back
+import app.viki.resources.check_circle
+import app.viki.resources.cloud_download
+import app.viki.resources.error
 import app.viki.ui.devicelist.formFactorIcon
 import app.viki.ui.screens.CreateDeviceScreen
 import app.viki.ui.theme.StudioBorder
@@ -55,6 +55,7 @@ import app.viki.ui.theme.StudioSecondary
 import app.viki.ui.theme.StudioSurfaceElevated
 import com.slack.circuit.codegen.annotations.CircuitInject
 import dev.zacsweers.metro.Inject
+import org.jetbrains.compose.resources.vectorResource
 
 @CircuitInject(CreateDeviceScreen::class, AppScope::class)
 @Inject
@@ -82,7 +83,7 @@ fun CreateDeviceUi(
             enabled = !isCreating,
           ) {
             Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+              imageVector = vectorResource(Res.drawable.arrow_back),
               contentDescription = "Back to Device Manager",
             )
           }
@@ -302,7 +303,7 @@ fun CreateDeviceUi(
                   horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                   Icon(
-                    imageVector = Icons.Default.ErrorOutline,
+                    imageVector = vectorResource(Res.drawable.error),
                     contentDescription = null,
                     tint = StudioError,
                   )
@@ -337,7 +338,7 @@ fun CreateDeviceUi(
             ) {
               if (!state.selectedRelease.isSystemImageDownloaded) {
                 Icon(
-                  imageVector = Icons.Default.CloudDownload,
+                  imageVector = vectorResource(Res.drawable.cloud_download),
                   contentDescription = null,
                   modifier = Modifier.size(18.dp),
                 )
@@ -497,7 +498,7 @@ private fun ReleaseOptionCard(
           horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           Icon(
-            imageVector = Icons.Default.CheckCircle,
+            imageVector = vectorResource(Res.drawable.check_circle),
             contentDescription = null,
             tint = StudioSecondary,
             modifier = Modifier.size(16.dp),
@@ -514,7 +515,7 @@ private fun ReleaseOptionCard(
           horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
           Icon(
-            imageVector = Icons.Default.CloudDownload,
+            imageVector = vectorResource(Res.drawable.cloud_download),
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(16.dp),

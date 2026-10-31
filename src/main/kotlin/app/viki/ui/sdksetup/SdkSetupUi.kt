@@ -17,14 +17,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Android
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -44,6 +36,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.viki.di.AppScope
+import app.viki.resources.Res
+import app.viki.resources.android
+import app.viki.resources.check_circle
+import app.viki.resources.cloud_download
+import app.viki.resources.error
+import app.viki.resources.folder_open
+import app.viki.resources.refresh
+import app.viki.resources.warning
 import app.viki.ui.screens.SdkSetupScreen
 import app.viki.ui.theme.StudioBorder
 import app.viki.ui.theme.StudioError
@@ -54,6 +54,7 @@ import com.slack.circuit.codegen.annotations.CircuitInject
 import dev.zacsweers.metro.Inject
 import javax.swing.JFileChooser
 import javax.swing.SwingUtilities
+import org.jetbrains.compose.resources.vectorResource
 
 @CircuitInject(SdkSetupScreen::class, AppScope::class)
 @Inject
@@ -89,7 +90,7 @@ fun SdkSetupUi(
             contentAlignment = Alignment.Center,
           ) {
             Icon(
-              imageVector = Icons.Default.Android,
+              imageVector = vectorResource(Res.drawable.android),
               contentDescription = null,
               tint = StudioSecondary,
               modifier = Modifier.size(30.dp),
@@ -126,7 +127,7 @@ fun SdkSetupUi(
               when {
                 state.isReady -> {
                   Icon(
-                    imageVector = Icons.Default.CheckCircle,
+                    imageVector = vectorResource(Res.drawable.check_circle),
                     contentDescription = null,
                     tint = StudioSecondary,
                     modifier = Modifier.size(20.dp),
@@ -140,7 +141,7 @@ fun SdkSetupUi(
 
                 state.isIncomplete -> {
                   Icon(
-                    imageVector = Icons.Default.WarningAmber,
+                    imageVector = vectorResource(Res.drawable.warning),
                     contentDescription = null,
                     tint = StudioWarning,
                     modifier = Modifier.size(20.dp),
@@ -154,7 +155,7 @@ fun SdkSetupUi(
 
                 else -> {
                   Icon(
-                    imageVector = Icons.Default.CloudDownload,
+                    imageVector = vectorResource(Res.drawable.cloud_download),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -291,7 +292,7 @@ fun SdkSetupUi(
               horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
               Icon(
-                imageVector = Icons.Default.ErrorOutline,
+                imageVector = vectorResource(Res.drawable.error),
                 contentDescription = null,
                 tint = StudioError,
               )
@@ -324,7 +325,7 @@ fun SdkSetupUi(
             enabled = !isInstalling,
           ) {
             Icon(
-              imageVector = Icons.Default.FolderOpen,
+              imageVector = vectorResource(Res.drawable.folder_open),
               contentDescription = null,
               modifier = Modifier.size(18.dp),
             )
@@ -337,7 +338,7 @@ fun SdkSetupUi(
             enabled = !isInstalling,
           ) {
             Icon(
-              imageVector = Icons.Default.Refresh,
+              imageVector = vectorResource(Res.drawable.refresh),
               contentDescription = null,
               modifier = Modifier.size(18.dp),
             )
@@ -360,7 +361,7 @@ fun SdkSetupUi(
                 ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             ) {
               Icon(
-                imageVector = Icons.Default.CloudDownload,
+                imageVector = vectorResource(Res.drawable.cloud_download),
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
               )

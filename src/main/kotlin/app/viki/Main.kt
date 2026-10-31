@@ -1,8 +1,6 @@
 package app.viki
 
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Android
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -27,6 +25,8 @@ import androidx.compose.ui.window.rememberTrayState
 import androidx.compose.ui.window.rememberWindowState
 import app.viki.avd.EmulatorRunStatus
 import app.viki.di.VikiAppGraph
+import app.viki.resources.Res
+import app.viki.resources.android
 import app.viki.sdk.SdkStatus
 import app.viki.ui.screens.CreateDeviceScreen
 import app.viki.ui.screens.DeviceListScreen
@@ -40,6 +40,7 @@ import com.slack.circuit.foundation.rememberCircuitNavigator
 import com.slack.circuit.runtime.screen.Screen
 import dev.zacsweers.metro.createGraph
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.vectorResource
 
 fun main() = application {
   val appGraph = remember { createGraph<VikiAppGraph>() }
@@ -202,7 +203,7 @@ fun main() = application {
 
 @Composable
 private fun rememberTrayIconPainter(): Painter {
-  val vectorPainter = rememberVectorPainter(Icons.Default.Android)
+  val vectorPainter = rememberVectorPainter(vectorResource(Res.drawable.android))
   return remember(vectorPainter) {
     object : Painter() {
       override val intrinsicSize = vectorPainter.intrinsicSize

@@ -17,19 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DevicesFold
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.TabletMac
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,6 +41,19 @@ import androidx.compose.ui.unit.dp
 import app.viki.avd.DeviceFormFactor
 import app.viki.avd.EmulatorRunStatus
 import app.viki.di.AppScope
+import app.viki.resources.Res
+import app.viki.resources.add
+import app.viki.resources.close
+import app.viki.resources.devices_fold
+import app.viki.resources.error
+import app.viki.resources.folder
+import app.viki.resources.play_arrow
+import app.viki.resources.refresh
+import app.viki.resources.restart_alt
+import app.viki.resources.search
+import app.viki.resources.smartphone
+import app.viki.resources.stop
+import app.viki.resources.tablet_mac
 import app.viki.ui.screens.DeviceListScreen
 import app.viki.ui.theme.StudioBorder
 import app.viki.ui.theme.StudioError
@@ -62,6 +62,7 @@ import app.viki.ui.theme.StudioSurfaceElevated
 import app.viki.ui.theme.StudioWarning
 import com.slack.circuit.codegen.annotations.CircuitInject
 import dev.zacsweers.metro.Inject
+import org.jetbrains.compose.resources.vectorResource
 
 @CircuitInject(DeviceListScreen::class, AppScope::class)
 @Inject
@@ -123,7 +124,7 @@ fun DeviceListUi(
               onClick = { state.eventSink(DeviceListScreen.Event.OpenSdkSettingsClicked) }
             ) {
               Icon(
-                imageVector = Icons.Default.Folder,
+                imageVector = vectorResource(Res.drawable.folder),
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
               )
@@ -133,7 +134,7 @@ fun DeviceListUi(
 
             OutlinedButton(onClick = { state.eventSink(DeviceListScreen.Event.RefreshClicked) }) {
               Icon(
-                imageVector = Icons.Default.Refresh,
+                imageVector = vectorResource(Res.drawable.refresh),
                 contentDescription = "Refresh",
                 modifier = Modifier.size(16.dp),
               )
@@ -147,7 +148,7 @@ fun DeviceListUi(
                 ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             ) {
               Icon(
-                imageVector = Icons.Default.Add,
+                imageVector = vectorResource(Res.drawable.add),
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
               )
@@ -172,7 +173,7 @@ fun DeviceListUi(
         placeholder = { Text("Filter virtual devices by name or Android release...") },
         leadingIcon = {
           Icon(
-            imageVector = Icons.Default.Search,
+            imageVector = vectorResource(Res.drawable.search),
             contentDescription = null,
             modifier = Modifier.size(18.dp),
           )
@@ -184,7 +185,7 @@ fun DeviceListUi(
                 onClick = { state.eventSink(DeviceListScreen.Event.SearchQueryChanged("")) }
               ) {
                 Icon(
-                  imageVector = Icons.Default.Close,
+                  imageVector = vectorResource(Res.drawable.close),
                   contentDescription = "Clear search",
                   modifier = Modifier.size(16.dp),
                 )
@@ -423,7 +424,7 @@ private fun DeviceRowCard(
                 colors = ButtonDefaults.buttonColors(containerColor = StudioSecondary),
               ) {
                 Icon(
-                  imageVector = Icons.Default.PlayArrow,
+                  imageVector = vectorResource(Res.drawable.play_arrow),
                   contentDescription = "Launch emulator",
                   modifier = Modifier.size(18.dp),
                 )
@@ -439,7 +440,7 @@ private fun DeviceRowCard(
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
               ) {
                 Icon(
-                  imageVector = Icons.Default.RestartAlt,
+                  imageVector = vectorResource(Res.drawable.restart_alt),
                   contentDescription = "Cold boot",
                   modifier = Modifier.size(16.dp),
                 )
@@ -456,7 +457,7 @@ private fun DeviceRowCard(
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
               ) {
                 Icon(
-                  imageVector = Icons.Default.Stop,
+                  imageVector = vectorResource(Res.drawable.stop),
                   contentDescription = "Stop emulator",
                   tint = StudioError,
                   modifier = Modifier.size(18.dp),
@@ -483,7 +484,7 @@ private fun DeviceRowCard(
           horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
           Icon(
-            imageVector = Icons.Default.ErrorOutline,
+            imageVector = vectorResource(Res.drawable.error),
             contentDescription = null,
             tint = StudioError,
             modifier = Modifier.size(16.dp),
@@ -501,7 +502,7 @@ private fun DeviceRowCard(
             modifier = Modifier.size(24.dp),
           ) {
             Icon(
-              imageVector = Icons.Default.Close,
+              imageVector = vectorResource(Res.drawable.close),
               contentDescription = "Dismiss error",
               modifier = Modifier.size(14.dp),
             )
@@ -612,7 +613,7 @@ private fun EmptyDevicesView(
           contentAlignment = Alignment.Center,
         ) {
           Icon(
-            imageVector = Icons.Default.Smartphone,
+            imageVector = vectorResource(Res.drawable.smartphone),
             contentDescription = null,
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(28.dp),
@@ -648,7 +649,7 @@ private fun EmptyDevicesView(
         } else {
           Button(onClick = onCreateClick) {
             Icon(
-              imageVector = Icons.Default.Add,
+              imageVector = vectorResource(Res.drawable.add),
               contentDescription = null,
               modifier = Modifier.size(18.dp),
             )
@@ -661,9 +662,10 @@ private fun EmptyDevicesView(
   }
 }
 
+@Composable
 internal fun formFactorIcon(formFactor: DeviceFormFactor): ImageVector =
   when (formFactor) {
-    DeviceFormFactor.PHONE -> Icons.Default.Smartphone
-    DeviceFormFactor.FOLDABLE -> Icons.Default.DevicesFold
-    DeviceFormFactor.TABLET -> Icons.Default.TabletMac
+    DeviceFormFactor.PHONE -> vectorResource(Res.drawable.smartphone)
+    DeviceFormFactor.FOLDABLE -> vectorResource(Res.drawable.devices_fold)
+    DeviceFormFactor.TABLET -> vectorResource(Res.drawable.tablet_mac)
   }
