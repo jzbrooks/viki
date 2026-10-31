@@ -1,8 +1,9 @@
 # Viki
+![build](https://github.com/jzbrooks/viki/actions/workflows/build.yml/badge.svg)
 
 A designer-first Android Virtual Device manager for macOS, Windows, and Linux. You can create, launch, and manage emulators without installing Android Studio.
 
-![Viki device manager](https://github.com/user-attachments/assets/c379d387-8300-47d0-9b81-b94d21fdebd2")
+![Viki device manager](docs/screenshot.png)
 
 - **SDK setup:** finds an existing Android SDK, or installs platform-tools and the emulator for you.
 - **Device presets:** Pixel phones, foldables, and tablets with designer-friendly hardware defaults.
