@@ -6,16 +6,12 @@ import dev.zacsweers.metro.SingleIn
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
-import java.time.Duration
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.io.path.exists
@@ -26,6 +22,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.w3c.dom.Element
 
 data class CmdlineToolsArchiveMetadata(
@@ -47,10 +46,11 @@ class AndroidSdkInstaller(
   private val platformDetector: HostPlatformDetector,
   private val sdkLocator: AndroidSdkLocator,
 ) {
-  private val httpClient: HttpClient =
-    HttpClient.newBuilder()
-      .followRedirects(HttpClient.Redirect.NORMAL)
-      .connectTimeout(Duration.ofSeconds(20))
+  private val httpClient: OkHttpClient =
+    OkHttpClient.Builder()
+      // Match the old JDK client's Redirect.NORMAL: never follow https -> http.
+      .followSslRedirects(false)
+      .connectTimeout(20, TimeUnit.SECONDS)
       .build()
 
   /**
@@ -257,17 +257,8 @@ class AndroidSdkInstaller(
     }
 
   private fun fetchLatestCmdlineToolsFromRepoXml(osFamily: OsFamily): CmdlineToolsArchiveMetadata {
-    val request =
-      HttpRequest.newBuilder()
-        .uri(URI.create(GOOGLE_REPO_XML_URL))
-        .timeout(Duration.ofSeconds(15))
-        .GET()
-        .build()
-
-    val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-    if (response.statusCode() != 200) {
-      error("HTTP ${response.statusCode()} fetching repository XML")
-    }
+    val request = Request.Builder().url(GOOGLE_REPO_XML_URL).build()
+    val call = httpClient.newCall(request).apply { timeout().timeout(15, TimeUnit.SECONDS) }
 
     val dbf =
       DocumentBuilderFactory.newInstance().apply {
@@ -276,7 +267,11 @@ class AndroidSdkInstaller(
         setFeature("http://xml.org/sax/features/external-parameter-entities", false)
       }
 
-    val doc = response.body().use { dbf.newDocumentBuilder().parse(it) }
+    val doc =
+      call.execute().use { response ->
+        if (response.code != 200) error("HTTP ${response.code} fetching repository XML")
+        dbf.newDocumentBuilder().parse(response.body.byteStream())
+      }
     val remotePackages = doc.getElementsByTagName("remotePackage")
 
     var bestMetadata: CmdlineToolsArchiveMetadata? = null
@@ -364,28 +359,26 @@ class AndroidSdkInstaller(
     destination: Path,
     onProgress: suspend (downloadedBytes: Long, totalBytes: Long) -> Unit,
   ) {
-    val uri = URI.create(metadata.url)
-    require(uri.scheme.equals("https", ignoreCase = true)) {
-      "Refusing to download SDK tools over non-HTTPS URI: ${metadata.url}"
-    }
+    val url = metadata.url.toHttpUrl()
+    require(url.isHttps) { "Refusing to download SDK tools over non-HTTPS URI: ${metadata.url}" }
 
-    val request = HttpRequest.newBuilder().uri(uri).timeout(Duration.ofMinutes(10)).GET().build()
-
-    val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-    if (response.statusCode() != 200) {
-      error(
-        "Failed to download command-line tools (HTTP ${response.statusCode()}) from ${metadata.url}"
-      )
-    }
-
-    val totalBytes =
-      response.headers().firstValueAsLong("Content-Length").orElse(metadata.expectedSizeBytes)
+    val call =
+      httpClient.newCall(Request.Builder().url(url).build()).apply {
+        timeout().timeout(10, TimeUnit.MINUTES)
+      }
 
     val digest = MessageDigest.getInstance(metadata.checksumAlgorithm)
     var downloadedBytes = 0L
     var lastReportedBytes = 0L
 
-    response.body().use { input ->
+    call.execute().use { response ->
+      if (response.code != 200) {
+        error("Failed to download command-line tools (HTTP ${response.code}) from ${metadata.url}")
+      }
+
+      val totalBytes =
+        response.body.contentLength().takeIf { it >= 0 } ?: metadata.expectedSizeBytes
+      val input = response.body.byteStream()
       Files.newOutputStream(destination).use { output ->
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         while (true) {

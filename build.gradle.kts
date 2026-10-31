@@ -42,6 +42,8 @@ dependencies {
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.kotlinx.coroutines.swing)
 
+  implementation(libs.okhttp)
+
   testImplementation(libs.kotlin.test.junit5)
   testImplementation(libs.junit.jupiter)
   testImplementation(libs.kotlinx.coroutines.test)
