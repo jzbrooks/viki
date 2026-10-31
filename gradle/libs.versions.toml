@@ -9,6 +9,7 @@ junit = "5.11.4"
 ktfmt-gradle = "0.27.0"
 okhttp = "5.3.0"
 kotlinx-io = "0.8.0"
+vgo = "5.0.0"
 
 [libraries]
 compose-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-material3" }
@@ -36,3 +37,4 @@ compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 metro = { id = "dev.zacsweers.metro", version.ref = "metro" }
 ktfmt = { id = "com.ncorti.ktfmt.gradle", version.ref = "ktfmt-gradle" }
+vgo = { id = "com.jzbrooks.vgo", version.ref = "vgo" }

@@ -7,6 +7,7 @@ plugins {
   alias(libs.plugins.compose.compiler)
   alias(libs.plugins.metro)
   alias(libs.plugins.ktfmt)
+  alias(libs.plugins.vgo)
 }
 
 group = "app.viki"
@@ -26,6 +27,11 @@ metro {
 }
 
 ktfmt { googleStyle() }
+
+vgo {
+  inputs = fileTree("src/main/composeResources/drawable") { include("*.xml") }
+  indent = 2
+}
 
 compose.resources { packageOfResClass = "app.viki.resources" }
 
