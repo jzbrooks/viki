@@ -10,8 +10,7 @@ import dev.zacsweers.metro.DependencyGraph
 import dev.zacsweers.metro.Provides
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.MainScope
 
 @DependencyGraph(AppScope::class)
 @SingleIn(AppScope::class)
@@ -24,8 +23,7 @@ interface VikiAppGraph {
 
   @Provides
   @SingleIn(AppScope::class)
-  fun provideAppCoroutineScope(): CoroutineScope =
-    CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  fun provideAppCoroutineScope(): CoroutineScope = MainScope()
 
   @Provides
   @SingleIn(AppScope::class)
