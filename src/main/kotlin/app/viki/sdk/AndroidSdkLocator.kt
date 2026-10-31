@@ -3,7 +3,6 @@ package app.viki.sdk
 import app.viki.di.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.Properties
@@ -15,6 +14,10 @@ import kotlin.io.path.name
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.io.asInputStream
+import kotlinx.io.asOutputStream
+import kotlinx.io.buffered
+import kotlinx.io.files.SystemFileSystem
 
 data class SdkToolsPaths(
   val sdkRoot: Path,
@@ -215,7 +218,7 @@ class AndroidSdkLocator(private val platformDetector: HostPlatformDetector) {
     if (!file.isRegularFile()) return null
     return runCatching {
       val props = Properties()
-      Files.newInputStream(file).use { props.load(it) }
+      SystemFileSystem.source(file.toKxPath()).buffered().asInputStream().use { props.load(it) }
       props.getProperty("sdk.dir")?.takeIf { it.isNotBlank() }?.let { Paths.get(it) }
     }
       .getOrNull()
@@ -224,14 +227,14 @@ class AndroidSdkLocator(private val platformDetector: HostPlatformDetector) {
   fun savePreferredSdkPath(sdkRoot: Path) {
     runCatching {
       val configDir = platformDetector.current.vikiConfigDir
-      Files.createDirectories(configDir)
+      SystemFileSystem.createDirectories(configDir.toKxPath())
       val file = settingsFile()
       val props = Properties()
       if (file.isRegularFile()) {
-        Files.newInputStream(file).use { props.load(it) }
+        SystemFileSystem.source(file.toKxPath()).buffered().asInputStream().use { props.load(it) }
       }
       props.setProperty("sdk.dir", sdkRoot.toAbsolutePath().normalize().toString())
-      Files.newOutputStream(file).use {
+      SystemFileSystem.sink(file.toKxPath()).buffered().asOutputStream().use {
         props.store(it, "Viki Android Virtual Device Manager Settings")
       }
     }

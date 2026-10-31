@@ -20,6 +20,8 @@ import com.slack.circuit.test.FakeNavigator
 import com.slack.circuit.test.test
 import dev.zacsweers.metro.createGraph
 import java.nio.file.Files
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -96,6 +98,41 @@ class VikiTests {
           envProvider = { key -> if (key == "ANDROID_HOME") tempSdk.toString() else null }
         )
       assertTrue(detected is SdkStatus.Ready)
+    } finally {
+      tempSdk.toFile().deleteRecursively()
+    }
+  }
+
+  @Test
+  fun `AndroidSdkInstaller extracts cmdline-tools zip into latest and blocks zip slip`() {
+    val tempSdk = Files.createTempDirectory("viki-test-extract")
+    try {
+      val detector = HostPlatformDetector()
+      val installer = AndroidSdkInstaller(detector, AndroidSdkLocator(detector))
+
+      fun writeZip(vararg entries: Pair<String, String>) =
+        tempSdk.resolve("tools.zip").also { zip ->
+          ZipOutputStream(Files.newOutputStream(zip)).use { out ->
+            for ((name, body) in entries) {
+              out.putNextEntry(ZipEntry(name))
+              out.write(body.toByteArray())
+              out.closeEntry()
+            }
+          }
+        }
+
+      installer.extractCmdlineToolsZip(
+        writeZip("cmdline-tools/bin/sdkmanager" to "a", "cmdline-tools/lib/x.jar" to "bb"),
+        tempSdk,
+      )
+      val latest = tempSdk.resolve("cmdline-tools/latest")
+      assertEquals("a", Files.readString(latest.resolve("bin/sdkmanager")))
+      assertEquals("bb", Files.readString(latest.resolve("lib/x.jar")))
+
+      val slip = runCatching {
+        installer.extractCmdlineToolsZip(writeZip("cmdline-tools/../../evil" to "x"), tempSdk)
+      }
+      assertTrue(slip.exceptionOrNull()?.message.orEmpty().contains("Zip Slip"))
     } finally {
       tempSdk.toFile().deleteRecursively()
     }

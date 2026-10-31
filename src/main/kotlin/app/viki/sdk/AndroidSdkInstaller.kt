@@ -8,7 +8,6 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermission
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
@@ -22,6 +21,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.io.asInputStream
+import kotlinx.io.asSource
+import kotlinx.io.buffered
+import kotlinx.io.files.SystemFileSystem
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -59,7 +62,7 @@ class AndroidSdkInstaller(
    */
   fun installOrRepairSdk(targetSdkRoot: Path): Flow<SdkInstallProgress> = flow {
     val sdkRoot = targetSdkRoot.toAbsolutePath().normalize()
-    Files.createDirectories(sdkRoot)
+    SystemFileSystem.createDirectories(sdkRoot.toKxPath())
 
     val initialTools = sdkLocator.inspectSdkRoot(sdkRoot)
 
@@ -114,7 +117,7 @@ class AndroidSdkInstaller(
         )
         extractCmdlineToolsZip(tempZip, sdkRoot)
       } finally {
-        Files.deleteIfExists(tempZip)
+        SystemFileSystem.delete(tempZip.toKxPath(), mustExist = false)
       }
     }
 
@@ -379,7 +382,7 @@ class AndroidSdkInstaller(
       val totalBytes =
         response.body.contentLength().takeIf { it >= 0 } ?: metadata.expectedSizeBytes
       val input = response.body.byteStream()
-      Files.newOutputStream(destination).use { output ->
+      SystemFileSystem.sink(destination.toKxPath()).buffered().use { output ->
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         while (true) {
           val read = input.read(buffer)
@@ -397,7 +400,7 @@ class AndroidSdkInstaller(
 
     val actualChecksumHex = digest.digest().joinToString("") { "%02x".format(it) }
     if (!actualChecksumHex.equals(metadata.expectedChecksumHex, ignoreCase = true)) {
-      Files.deleteIfExists(destination)
+      SystemFileSystem.delete(destination.toKxPath(), mustExist = false)
       error(
         "Checksum verification failed for ${metadata.url}: " +
           "expected ${metadata.expectedChecksumHex} (${metadata.checksumAlgorithm}), got $actualChecksumHex"
@@ -413,9 +416,10 @@ class AndroidSdkInstaller(
     if (tempExtractDir.exists()) {
       tempExtractDir.toFile().deleteRecursively()
     }
-    Files.createDirectories(tempExtractDir)
+    SystemFileSystem.createDirectories(tempExtractDir.toKxPath())
 
-    ZipInputStream(Files.newInputStream(zipFile)).use { zis ->
+    ZipInputStream(SystemFileSystem.source(zipFile.toKxPath()).buffered().asInputStream()).use { zis
+      ->
       var entry = zis.nextEntry
       while (entry != null) {
         // The official zip has top-level `cmdline-tools/...` prefix; strip it so files land
@@ -428,10 +432,13 @@ class AndroidSdkInstaller(
             error("Blocked Zip Slip path traversal entry: ${entry.name}")
           }
           if (entry.isDirectory) {
-            Files.createDirectories(outPath)
+            SystemFileSystem.createDirectories(outPath.toKxPath())
           } else {
-            Files.createDirectories(outPath.parent)
-            Files.copy(zis, outPath, StandardCopyOption.REPLACE_EXISTING)
+            SystemFileSystem.createDirectories(outPath.parent.toKxPath())
+            // transferFrom doesn't close zis, so the next entry stays readable.
+            SystemFileSystem.sink(outPath.toKxPath()).buffered().use {
+              it.transferFrom(zis.asSource())
+            }
           }
         }
         zis.closeEntry()
@@ -442,8 +449,8 @@ class AndroidSdkInstaller(
     if (cmdlineLatestDir.exists()) {
       cmdlineLatestDir.toFile().deleteRecursively()
     }
-    Files.createDirectories(cmdlineLatestDir.parent)
-    Files.move(tempExtractDir, cmdlineLatestDir, StandardCopyOption.REPLACE_EXISTING)
+    SystemFileSystem.createDirectories(cmdlineLatestDir.parent.toKxPath())
+    SystemFileSystem.atomicMove(tempExtractDir.toKxPath(), cmdlineLatestDir.toKxPath())
 
     // Ensure binaries in bin/ are executable on macOS and Linux
     if (platformDetector.current.osFamily != OsFamily.WINDOWS) {

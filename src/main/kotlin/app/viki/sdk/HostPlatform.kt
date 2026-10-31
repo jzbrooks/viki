@@ -6,6 +6,9 @@ import dev.zacsweers.metro.SingleIn
 import java.nio.file.Path
 import java.nio.file.Paths
 
+/** Bridges NIO paths, which we keep for normalize/startsWith, to kotlinx-io for actual file IO. */
+internal fun Path.toKxPath(): kotlinx.io.files.Path = kotlinx.io.files.Path(toString())
+
 enum class OsFamily(
   val displayName: String,
   val cmdlineToolsOsKey: String,

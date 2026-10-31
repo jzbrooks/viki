@@ -6,10 +6,10 @@ import app.viki.sdk.AndroidSdkLocator
 import app.viki.sdk.HostPlatformDetector
 import app.viki.sdk.SdkInstallProgress
 import app.viki.sdk.SdkStatus
+import app.viki.sdk.toKxPath
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import java.io.OutputStreamWriter
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -27,6 +27,10 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.io.buffered
+import kotlinx.io.files.SystemFileSystem
+import kotlinx.io.readLine
+import kotlinx.io.writeString
 
 data class AvdDevice(
   val avdId: String,
@@ -303,9 +307,9 @@ class AvdRepository(
     entries["disk.dataPartition.size"] = "6442450944"
     entries["showDeviceFrame"] = "yes"
 
-    Files.createDirectories(configIniPath.parent)
+    SystemFileSystem.createDirectories(configIniPath.parent.toKxPath())
     val content = entries.entries.joinToString("\n", postfix = "\n") { (k, v) -> "$k=$v" }
-    Files.writeString(configIniPath, content, StandardCharsets.UTF_8)
+    SystemFileSystem.sink(configIniPath.toKxPath()).buffered().use { it.writeString(content) }
   }
 
   internal fun loadAvdsFromDirectory(avdHomeDir: Path): List<AvdDevice> {
@@ -395,7 +399,11 @@ class AvdRepository(
   internal fun parseKeyValueIni(path: Path): Map<String, String> {
     val result = linkedMapOf<String, String>()
     if (!path.isRegularFile()) return result
-    Files.readAllLines(path, StandardCharsets.UTF_8).forEach { rawLine ->
+    val lines =
+      SystemFileSystem.source(path.toKxPath()).buffered().use { source ->
+        generateSequence { source.readLine() }.toList()
+      }
+    lines.forEach { rawLine ->
       val line = rawLine.trim()
       if (line.isNotEmpty() && !line.startsWith("#") && !line.startsWith(";")) {
         val eqIdx = line.indexOf('=')
