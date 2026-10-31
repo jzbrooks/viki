@@ -21,9 +21,7 @@ interface VikiAppGraph {
   val emulatorProcessManager: EmulatorProcessManager
   val sdkLocator: AndroidSdkLocator
 
-  @Provides
-  @SingleIn(AppScope::class)
-  fun provideAppCoroutineScope(): CoroutineScope = MainScope()
+  @Provides @SingleIn(AppScope::class) fun provideAppCoroutineScope(): CoroutineScope = MainScope()
 
   @Provides
   @SingleIn(AppScope::class)
