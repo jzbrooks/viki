@@ -1,0 +1,13 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Kotlin
+.kotlin/
+
+# Local configuration
+local.properties
+
+# Keep Gradle Wrapper jar tracked
+!gradle/wrapper/gradle-wrapper.jar
