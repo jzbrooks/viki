@@ -9,8 +9,6 @@ import java.util.Properties
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
-import kotlin.io.path.listDirectoryEntries
-import kotlin.io.path.name
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,14 +19,9 @@ import kotlinx.io.files.SystemFileSystem
 
 data class SdkToolsPaths(
   val sdkRoot: Path,
-  val sdkManagerBin: Path?,
-  val avdManagerBin: Path?,
   val emulatorBin: Path?,
   val adbBin: Path?,
 ) {
-  val hasCmdlineTools: Boolean
-    get() = sdkManagerBin != null && avdManagerBin != null
-
   val hasEmulator: Boolean
     get() = emulatorBin != null
 
@@ -36,11 +29,10 @@ data class SdkToolsPaths(
     get() = adbBin != null
 
   val isComplete: Boolean
-    get() = hasCmdlineTools && hasEmulator && hasPlatformTools
+    get() = hasEmulator && hasPlatformTools
 
   val missingComponents: List<String>
     get() = buildList {
-      if (!hasCmdlineTools) add("Android Command-Line Tools")
       if (!hasPlatformTools) add("Android SDK Platform-Tools (adb)")
       if (!hasEmulator) add("Android Emulator")
     }
@@ -132,7 +124,7 @@ class AndroidSdkLocator(private val platformDetector: HostPlatformDetector) {
     for ((candidatePath, source) in distinctCandidates) {
       if (candidatePath.exists() && candidatePath.isDirectory()) {
         val tools = inspectSdkRoot(candidatePath)
-        if (tools.hasCmdlineTools || tools.hasEmulator || tools.hasPlatformTools) {
+        if (tools.hasEmulator || tools.hasPlatformTools) {
           return SdkStatus.Incomplete(tools, source)
         }
       }
@@ -148,14 +140,8 @@ class AndroidSdkLocator(private val platformDetector: HostPlatformDetector) {
     val platform = platformDetector.current
     val normalizedRoot = sdkRoot.toAbsolutePath().normalize()
 
-    val sdkManagerName = platform.scriptName("sdkmanager")
-    val avdManagerName = platform.scriptName("avdmanager")
     val emulatorName = platform.executableName("emulator")
     val adbName = platform.executableName("adb")
-
-    val cmdlineBinDir = findCmdlineToolsBinDir(normalizedRoot, sdkManagerName)
-    val sdkManagerBin = cmdlineBinDir?.resolve(sdkManagerName)?.takeIf { it.isRegularFile() }
-    val avdManagerBin = cmdlineBinDir?.resolve(avdManagerName)?.takeIf { it.isRegularFile() }
 
     val emulatorBin =
       normalizedRoot.resolve("emulator").resolve(emulatorName).takeIf { it.isRegularFile() }
@@ -164,50 +150,9 @@ class AndroidSdkLocator(private val platformDetector: HostPlatformDetector) {
 
     return SdkToolsPaths(
       sdkRoot = normalizedRoot,
-      sdkManagerBin = sdkManagerBin,
-      avdManagerBin = avdManagerBin,
       emulatorBin = emulatorBin,
       adbBin = adbBin,
     )
-  }
-
-  private fun findCmdlineToolsBinDir(sdkRoot: Path, sdkManagerScriptName: String): Path? {
-    val cmdlineToolsDir = sdkRoot.resolve("cmdline-tools")
-    if (cmdlineToolsDir.exists() && cmdlineToolsDir.isDirectory()) {
-      // Check cmdline-tools/latest/bin first
-      val latestBin = cmdlineToolsDir.resolve("latest/bin")
-      if (latestBin.resolve(sdkManagerScriptName).isRegularFile()) {
-        return latestBin
-      }
-      // Check versioned directories e.g. cmdline-tools/19.0/bin, sorted descending
-      val versionDirs = runCatching {
-        cmdlineToolsDir
-          .listDirectoryEntries()
-          .filter { it.isDirectory() && it.name != "latest" }
-          .sortedByDescending { it.name }
-      }
-        .getOrDefault(emptyList())
-
-      for (dir in versionDirs) {
-        val bin = dir.resolve("bin")
-        if (bin.resolve(sdkManagerScriptName).isRegularFile()) {
-          return bin
-        }
-      }
-      // Also check direct cmdline-tools/bin (e.g. Homebrew cask structure)
-      val directBin = cmdlineToolsDir.resolve("bin")
-      if (directBin.resolve(sdkManagerScriptName).isRegularFile()) {
-        return directBin
-      }
-    }
-
-    // Legacy tools/bin fallback
-    val legacyBin = sdkRoot.resolve("tools/bin")
-    if (legacyBin.resolve(sdkManagerScriptName).isRegularFile()) {
-      return legacyBin
-    }
-
-    return null
   }
 
   private fun settingsFile(): Path =

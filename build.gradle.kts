@@ -48,7 +48,10 @@ dependencies {
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.kotlinx.coroutines.swing)
 
-  implementation(libs.okhttp)
+  implementation(libs.android.sdklib)
+  implementation(libs.android.common)
+  implementation(libs.adblib)
+  implementation(libs.adblib.tools)
   implementation(libs.kotlinx.io.core)
 
   testImplementation(libs.kotlin.test.junit5)

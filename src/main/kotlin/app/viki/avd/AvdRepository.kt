@@ -6,18 +6,18 @@ import app.viki.sdk.AndroidSdkLocator
 import app.viki.sdk.HostPlatformDetector
 import app.viki.sdk.SdkInstallProgress
 import app.viki.sdk.SdkStatus
-import app.viki.sdk.toKxPath
+import com.android.prefs.AndroidLocationsSingleton
+import com.android.repository.api.ProgressIndicatorAdapter
+import com.android.sdklib.devices.DeviceManager
+import com.android.sdklib.internal.avd.AvdInfo
+import com.android.sdklib.internal.avd.AvdManager
+import com.android.sdklib.repository.AndroidSdkHandler
+import com.android.utils.NullLogger
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import java.io.OutputStreamWriter
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
-import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
-import kotlin.io.path.isRegularFile
-import kotlin.io.path.listDirectoryEntries
-import kotlin.io.path.nameWithoutExtension
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,10 +27,6 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
-import kotlinx.io.buffered
-import kotlinx.io.files.SystemFileSystem
-import kotlinx.io.readLine
-import kotlinx.io.writeString
 
 data class AvdDevice(
   val avdId: String,
@@ -83,6 +79,8 @@ class AvdRepository(
   private val sdkLocator: AndroidSdkLocator,
   private val sdkInstaller: AndroidSdkInstaller,
 ) {
+  private val logger = NullLogger()
+
   private val _devices = MutableStateFlow<List<AvdDevice>>(emptyList())
   val devices: StateFlow<List<AvdDevice>> = _devices.asStateFlow()
 
@@ -111,8 +109,8 @@ class AvdRepository(
   /**
    * Guided designer workflow:
    * 1. Ensures the platform (`platforms;android-<api>`) and system image are installed.
-   * 2. Invokes `avdmanager create avd` with the matching device profile.
-   * 3. Applies designer-friendly hardware defaults to `<avd>.avd/config.ini`.
+   * 2. Creates the AVD with the matching device profile.
+   * 3. Applies designer-friendly hardware defaults to its `config.ini`.
    */
   fun createDesignerAvd(
     displayName: String,
@@ -123,8 +121,6 @@ class AvdRepository(
     val tools =
       (status as? SdkStatus.Ready)?.tools
         ?: error("Android SDK is not ready. Please complete SDK setup first.")
-    val avdManagerBin =
-      tools.avdManagerBin ?: error("avdmanager binary was not found in ${tools.sdkRoot}")
 
     val hostArch = platformDetector.current.cpuArch
     val preferredImagePkg = releasePreset.preferredSystemImagePackage(hostArch)
@@ -183,44 +179,48 @@ class AvdRepository(
     )
 
     val avdId = sanitizeAvdId(displayName)
-    val availableDevices = queryAvailableAvdDeviceIds(tools.sdkRoot, avdManagerBin)
-    val resolvedDeviceId =
-      devicePreset.avdManagerDeviceIds.firstOrNull { it in availableDevices }
-        ?: availableDevices.firstOrNull { it.contains("pixel", ignoreCase = true) }
+    val sdkHandler = AndroidSdkHandler.getInstance(AndroidLocationsSingleton, tools.sdkRoot)
+    val deviceManager = DeviceManager.createInstance(sdkHandler, logger)
+    val device =
+      devicePreset.avdManagerDeviceIds.firstNotNullOfOrNull {
+        deviceManager.getDevice(it, "Google")
+      }
+        ?: deviceManager.getDevices(DeviceManager.DeviceCategory.DEFAULT).firstOrNull {
+          it.id.contains("pixel", ignoreCase = true)
+        }
+        ?: error("No Pixel hardware profile is available in this SDK")
+    val systemImage =
+      sdkHandler.getSystemImageManager(NoOpProgress).images.firstOrNull {
+        it.`package`.path == finalSystemImagePkg
+      } ?: error("System image $finalSystemImagePkg is not installed")
 
     emit(
       SdkInstallProgress(
         stageTitle = "Creating Virtual Device",
-        detailMessage = "Running avdmanager for \"$displayName\" ($avdId)...",
+        detailMessage = "Creating \"$displayName\" ($avdId)...",
         fraction = 0.94f,
       )
     )
 
-    val command = buildList {
-      add(avdManagerBin.toString())
-      add("create")
-      add("avd")
-      add("-n")
-      add(avdId)
-      add("-k")
-      add(finalSystemImagePkg)
-      if (resolvedDeviceId != null) {
-        add("-d")
-        add(resolvedDeviceId)
-      }
-      add("--force")
-    }
-
-    val process = sdkInstaller.createSdkToolProcessBuilder(tools.sdkRoot, command).start()
-    OutputStreamWriter(process.outputStream).use { writer ->
-      writer.write("no\n")
-      writer.flush()
-    }
-    val output = process.inputStream.bufferedReader().use { it.readText() }
-    val exitCode = process.waitFor()
-    if (exitCode != 0) {
-      error("Failed to create AVD (exit code $exitCode):\n${output.trim()}")
-    }
+    val avdManager =
+      AvdManager.createInstance(
+        sdkHandler,
+        platformDetector.current.avdHomeDir,
+        deviceManager,
+        logger,
+      )
+    avdManager.getAvd(avdId, false)?.let { avdManager.deleteAvd(it) }
+    val avd =
+      avdManager.createAvd(
+        avdManager.createAvdBuilder(device).apply {
+          avdName = avdId
+          this.displayName =
+            displayName.trim().ifBlank {
+              "${devicePreset.displayName} API ${releasePreset.apiLevel}"
+            }
+          this.systemImage = systemImage
+        }
+      )
 
     emit(
       SdkInstallProgress(
@@ -231,16 +231,8 @@ class AvdRepository(
       )
     )
 
-    val avdHome = platformDetector.current.avdHomeDir
-    val avdFolder = resolveAvdFolder(avdHome, avdId)
-    val configIni = avdFolder.resolve("config.ini")
-    applyDesignerConfigOverrides(
-      configIniPath = configIni,
-      avdId = avdId,
-      displayName =
-        displayName.trim().ifBlank { "${devicePreset.displayName} API ${releasePreset.apiLevel}" },
-      devicePreset = devicePreset,
-    )
+    // updateAvd replaces config.ini wholesale, so merge onto the existing properties.
+    avdManager.updateAvd(avd, avd.properties + designerHardwareConfig(devicePreset))
 
     refreshDevices()
 
@@ -254,167 +246,66 @@ class AvdRepository(
   }
     .flowOn(Dispatchers.IO)
 
-  private fun queryAvailableAvdDeviceIds(sdkRoot: Path, avdManagerBin: Path): Set<String> =
-    runCatching {
-      val process =
-        sdkInstaller
-          .createSdkToolProcessBuilder(
-            sdkRoot = sdkRoot,
-            command = listOf(avdManagerBin.toString(), "list", "device", "-c"),
-          )
-          .start()
-      val output = process.inputStream.bufferedReader().use { it.readLines() }
-      process.waitFor()
-      output.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-    }
-    .getOrDefault(emptySet())
+  internal fun designerHardwareConfig(devicePreset: DevicePreset): Map<String, String> =
+    mapOf(
+      "hw.lcd.width" to devicePreset.widthPx.toString(),
+      "hw.lcd.height" to devicePreset.heightPx.toString(),
+      "hw.lcd.density" to devicePreset.densityDpi.toString(),
+      "hw.keyboard" to "yes",
+      "hw.gpu.enabled" to "yes",
+      "hw.gpu.mode" to "auto",
+      "hw.ramSize" to "4096",
+      "disk.dataPartition.size" to "6442450944",
+      "showDeviceFrame" to "yes",
+    )
 
-  private fun resolveAvdFolder(avdHome: Path, avdId: String): Path {
-    val rootIni = avdHome.resolve("$avdId.ini")
-    if (rootIni.isRegularFile()) {
-      val rootMap = parseKeyValueIni(rootIni)
-      rootMap["path"]?.let { pathStr ->
-        val p = Paths.get(pathStr)
-        if (p.exists()) return p
-      }
-    }
-    return avdHome.resolve("$avdId.avd")
-  }
-
-  internal fun applyDesignerConfigOverrides(
-    configIniPath: Path,
-    avdId: String,
-    displayName: String,
-    devicePreset: DevicePreset,
-  ) {
-    val entries =
-      if (configIniPath.isRegularFile()) {
-        parseKeyValueIni(configIniPath).toMutableMap()
-      } else {
-        linkedMapOf()
-      }
-
-    entries["AvdId"] = avdId
-    entries["avd.ini.displayname"] = displayName
-    entries["hw.device.name"] = entries["hw.device.name"] ?: devicePreset.id
-    entries["hw.lcd.width"] = devicePreset.widthPx.toString()
-    entries["hw.lcd.height"] = devicePreset.heightPx.toString()
-    entries["hw.lcd.density"] = devicePreset.densityDpi.toString()
-    entries["hw.keyboard"] = "yes"
-    entries["hw.gpu.enabled"] = "yes"
-    entries["hw.gpu.mode"] = "auto"
-    entries["hw.ramSize"] = "4096"
-    entries["disk.dataPartition.size"] = "6442450944"
-    entries["showDeviceFrame"] = "yes"
-
-    SystemFileSystem.createDirectories(configIniPath.parent.toKxPath())
-    val content = entries.entries.joinToString("\n", postfix = "\n") { (k, v) -> "$k=$v" }
-    SystemFileSystem.sink(configIniPath.toKxPath()).buffered().use { it.writeString(content) }
-  }
-
-  internal fun loadAvdsFromDirectory(avdHomeDir: Path): List<AvdDevice> {
-    if (!avdHomeDir.exists() || !avdHomeDir.isDirectory()) {
-      return emptyList()
-    }
-
-    val iniFiles = runCatching {
-      avdHomeDir.listDirectoryEntries("*.ini")
-    }
-      .getOrDefault(emptyList())
-
-    return iniFiles
-      .mapNotNull { iniFile ->
-        runCatching { parseAvdFromIniFile(avdHomeDir, iniFile) }.getOrNull()
-      }
-      .sortedBy { it.displayName.lowercase() }
-  }
-
-  internal fun parseAvdFromIniFile(avdHomeDir: Path, iniFile: Path): AvdDevice? {
-    val rootProps = parseKeyValueIni(iniFile)
-    val avdId = iniFile.nameWithoutExtension
-    val avdFolder =
-      rootProps["path"]?.let { Paths.get(it) }
-        ?: rootProps["path.rel"]?.let { avdHomeDir.resolve(it) }
-        ?: avdHomeDir.resolve("$avdId.avd")
-
-    if (!avdFolder.exists() || !avdFolder.isDirectory()) {
-      return null
-    }
-
-    val configIni = avdFolder.resolve("config.ini")
-    val configProps =
-      if (configIni.isRegularFile()) {
-        parseKeyValueIni(configIni)
-      } else {
-        emptyMap()
-      }
-
-    val rawDisplayName =
-      configProps["avd.ini.displayname"]?.takeIf { it.isNotBlank() } ?: avdId.replace('_', ' ')
-
-    val deviceProfileName = configProps["hw.device.name"]?.takeIf { it.isNotBlank() } ?: "pixel"
-
-    val sysDir = configProps["image.sysdir.1"].orEmpty()
-    val targetProp = rootProps["target"].orEmpty()
-    val apiLevel = extractApiLevel(sysDir, targetProp)
-
-    val abi =
-      configProps["abi.type"]
-        ?: extractAbiFromSysDir(sysDir)
-        ?: platformDetector.current.cpuArch.abiName
-
-    val tagId = configProps["tag.id"] ?: extractTagFromSysDir(sysDir) ?: "google_apis"
-
-    val widthPx = configProps["hw.lcd.width"]?.toIntOrNull() ?: 1080
-    val heightPx = configProps["hw.lcd.height"]?.toIntOrNull() ?: 2400
-    val densityDpi = configProps["hw.lcd.density"]?.toIntOrNull() ?: 420
-
-    val formFactor =
-      DesignerCatalog.inferFormFactor(
-        deviceName = "$deviceProfileName $rawDisplayName",
-        widthPx = widthPx,
-        heightPx = heightPx,
-      )
-
-    val diskBytes = computeDirectorySizeBytes(avdFolder)
-
-    return AvdDevice(
-      avdId = avdId,
-      displayName = rawDisplayName,
-      deviceProfileName = deviceProfileName,
-      formFactor = formFactor,
-      apiLevel = apiLevel,
-      androidReleaseLabel = DesignerCatalog.releaseNameForApi(apiLevel),
-      abi = abi,
-      tagId = tagId,
-      widthPx = widthPx,
-      heightPx = heightPx,
-      densityDpi = densityDpi,
-      diskSizeBytes = diskBytes,
-      avdFolder = avdFolder,
-      iniFile = iniFile,
+  internal fun avdManager(avdHomeDir: Path): AvdManager {
+    val sdkHandler = AndroidSdkHandler.getInstance(AndroidLocationsSingleton, currentSdkRoot())
+    return AvdManager.createInstance(
+      sdkHandler,
+      avdHomeDir,
+      DeviceManager.createInstance(sdkHandler, logger),
+      logger,
     )
   }
 
-  internal fun parseKeyValueIni(path: Path): Map<String, String> {
-    val result = linkedMapOf<String, String>()
-    if (!path.isRegularFile()) return result
-    val lines =
-      SystemFileSystem.source(path.toKxPath()).buffered().use { source ->
-        generateSequence { source.readLine() }.toList()
-      }
-    lines.forEach { rawLine ->
-      val line = rawLine.trim()
-      if (line.isNotEmpty() && !line.startsWith("#") && !line.startsWith(";")) {
-        val eqIdx = line.indexOf('=')
-        if (eqIdx > 0) {
-          val key = line.substring(0, eqIdx).trim()
-          val value = line.substring(eqIdx + 1).trim()
-          result[key] = value
-        }
-      }
+  internal fun loadAvdsFromDirectory(avdHomeDir: Path): List<AvdDevice> {
+    if (!avdHomeDir.isDirectory()) return emptyList()
+    return avdManager(avdHomeDir)
+      .allAvds
+      .map { it.toAvdDevice() }
+      .sortedBy { it.displayName.lowercase() }
+  }
+
+  private fun currentSdkRoot(): Path? =
+    when (val status = sdkLocator.sdkStatus.value) {
+      is SdkStatus.Ready -> status.tools.sdkRoot
+      is SdkStatus.Incomplete -> status.tools.sdkRoot
+      is SdkStatus.NotFound -> null
     }
-    return result
+
+  private fun AvdInfo.toAvdDevice(): AvdDevice {
+    val widthPx = properties["hw.lcd.width"]?.toIntOrNull() ?: 1080
+    val heightPx = properties["hw.lcd.height"]?.toIntOrNull() ?: 2400
+    val deviceProfileName = deviceName.ifBlank { "pixel" }
+    val apiLevel = androidVersion.apiLevel.takeIf { it > 1 }
+    return AvdDevice(
+      avdId = name,
+      displayName = displayName,
+      deviceProfileName = deviceProfileName,
+      formFactor =
+        DesignerCatalog.inferFormFactor("$deviceProfileName $displayName", widthPx, heightPx),
+      apiLevel = apiLevel,
+      androidReleaseLabel = DesignerCatalog.releaseNameForApi(apiLevel),
+      abi = abiType?.takeIf { it.isNotBlank() } ?: platformDetector.current.cpuArch.abiName,
+      tagId = tag.id,
+      widthPx = widthPx,
+      heightPx = heightPx,
+      densityDpi = properties["hw.lcd.density"]?.toIntOrNull() ?: 420,
+      diskSizeBytes = computeDirectorySizeBytes(dataFolderPath),
+      avdFolder = dataFolderPath,
+      iniFile = iniFile,
+    )
   }
 
   internal fun sanitizeAvdId(displayName: String): String {
@@ -427,21 +318,6 @@ class AvdRepository(
     return cleaned.ifBlank { "Viki_Emulator" }
   }
 
-  private fun extractApiLevel(sysDir: String, targetProp: String): Int? {
-    val match = API_LEVEL_REGEX.find(sysDir) ?: API_LEVEL_REGEX.find(targetProp)
-    return match?.groupValues?.getOrNull(1)?.toIntOrNull()
-  }
-
-  private fun extractAbiFromSysDir(sysDir: String): String? {
-    val parts = sysDir.replace('\\', '/').trim('/').split('/')
-    return parts.lastOrNull()?.takeIf { it.isNotBlank() }
-  }
-
-  private fun extractTagFromSysDir(sysDir: String): String? {
-    val parts = sysDir.replace('\\', '/').trim('/').split('/')
-    return if (parts.size >= 2) parts[parts.size - 2] else null
-  }
-
   private fun computeDirectorySizeBytes(dir: Path): Long = runCatching {
     Files.walk(dir, 2).use { stream ->
       stream
@@ -451,8 +327,6 @@ class AvdRepository(
     }
   }
     .getOrDefault(0L)
-
-  companion object {
-    private val API_LEVEL_REGEX = Regex("""android-(\d+)""")
-  }
 }
+
+private object NoOpProgress : ProgressIndicatorAdapter()

@@ -20,8 +20,6 @@ import com.slack.circuit.test.FakeNavigator
 import com.slack.circuit.test.test
 import dev.zacsweers.metro.createGraph
 import java.nio.file.Files
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -39,7 +37,6 @@ class VikiTests {
         osNameProp = "Mac OS X",
         osArchProp = "aarch64",
         userHomeProp = "/Users/designer",
-        javaHomeProp = "/Library/Java/Home",
       )
     assertEquals(OsFamily.MACOS, macArm.osFamily)
     assertEquals(CpuArch.ARM64, macArm.cpuArch)
@@ -50,7 +47,6 @@ class VikiTests {
         osNameProp = "Linux",
         osArchProp = "amd64",
         userHomeProp = "/home/designer",
-        javaHomeProp = "/usr/lib/jvm/java-21",
       )
     assertEquals(OsFamily.LINUX, linuxX64.osFamily)
     assertEquals(CpuArch.X86_64, linuxX64.cpuArch)
@@ -67,21 +63,16 @@ class VikiTests {
       // Empty dir -> nothing installed
       val emptyInspection = locator.inspectSdkRoot(tempSdk)
       assertEquals(false, emptyInspection.isComplete)
-      assertEquals(3, emptyInspection.missingComponents.size)
+      assertEquals(2, emptyInspection.missingComponents.size)
 
-      // Populate cmdline-tools/latest/bin, platform-tools, and emulator
+      // Populate platform-tools, then emulator
       val platform = detector.current
-      val cmdlineBin = tempSdk.resolve("cmdline-tools/latest/bin")
-      Files.createDirectories(cmdlineBin)
-      Files.writeString(cmdlineBin.resolve(platform.scriptName("sdkmanager")), "#!/bin/sh\n")
-      Files.writeString(cmdlineBin.resolve(platform.scriptName("avdmanager")), "#!/bin/sh\n")
 
       val platformTools = tempSdk.resolve("platform-tools")
       Files.createDirectories(platformTools)
       Files.writeString(platformTools.resolve(platform.executableName("adb")), "#!/bin/sh\n")
 
       val partialInspection = locator.inspectSdkRoot(tempSdk)
-      assertEquals(true, partialInspection.hasCmdlineTools)
       assertEquals(true, partialInspection.hasPlatformTools)
       assertEquals(false, partialInspection.hasEmulator)
 
@@ -104,47 +95,12 @@ class VikiTests {
   }
 
   @Test
-  fun `AndroidSdkInstaller extracts cmdline-tools zip into latest and blocks zip slip`() {
-    val tempSdk = Files.createTempDirectory("viki-test-extract")
-    try {
-      val detector = HostPlatformDetector()
-      val installer = AndroidSdkInstaller(detector, AndroidSdkLocator(detector))
-
-      fun writeZip(vararg entries: Pair<String, String>) =
-        tempSdk.resolve("tools.zip").also { zip ->
-          ZipOutputStream(Files.newOutputStream(zip)).use { out ->
-            for ((name, body) in entries) {
-              out.putNextEntry(ZipEntry(name))
-              out.write(body.toByteArray())
-              out.closeEntry()
-            }
-          }
-        }
-
-      installer.extractCmdlineToolsZip(
-        writeZip("cmdline-tools/bin/sdkmanager" to "a", "cmdline-tools/lib/x.jar" to "bb"),
-        tempSdk,
-      )
-      val latest = tempSdk.resolve("cmdline-tools/latest")
-      assertEquals("a", Files.readString(latest.resolve("bin/sdkmanager")))
-      assertEquals("bb", Files.readString(latest.resolve("lib/x.jar")))
-
-      val slip = runCatching {
-        installer.extractCmdlineToolsZip(writeZip("cmdline-tools/../../evil" to "x"), tempSdk)
-      }
-      assertTrue(slip.exceptionOrNull()?.message.orEmpty().contains("Zip Slip"))
-    } finally {
-      tempSdk.toFile().deleteRecursively()
-    }
-  }
-
-  @Test
   fun `AvdRepository parses AVD ini and config files and applies designer hardware overrides`() {
     val tempAvdHome = Files.createTempDirectory("viki-test-avd-home")
     try {
       val detector = HostPlatformDetector()
       val locator = AndroidSdkLocator(detector)
-      val installer = AndroidSdkInstaller(detector, locator)
+      val installer = AndroidSdkInstaller(locator)
       val repo = AvdRepository(detector, locator, installer)
 
       val avdId = "Pixel_9_Pro_Android_15"
@@ -174,11 +130,13 @@ class VikiTests {
       )
 
       val preset = DesignerCatalog.devicePresets.first { it.id == "pixel_9_pro" }
-      repo.applyDesignerConfigOverrides(
-        configIniPath = configIni,
-        avdId = avdId,
-        displayName = "Pixel 9 Pro (Android 15)",
-        devicePreset = preset,
+      val avdManager = repo.avdManager(tempAvdHome)
+      val avd = avdManager.getAvd(avdId, false)!!
+      avdManager.updateAvd(
+        avd,
+        avd.properties +
+          repo.designerHardwareConfig(preset) +
+          ("avd.ini.displayname" to "Pixel 9 Pro (Android 15)"),
       )
 
       val loaded = repo.loadAvdsFromDirectory(tempAvdHome)

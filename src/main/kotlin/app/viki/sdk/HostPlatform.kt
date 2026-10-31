@@ -9,14 +9,10 @@ import java.nio.file.Paths
 /** Bridges NIO paths, which we keep for normalize/startsWith, to kotlinx-io for actual file IO. */
 internal fun Path.toKxPath(): kotlinx.io.files.Path = kotlinx.io.files.Path(toString())
 
-enum class OsFamily(
-  val displayName: String,
-  val cmdlineToolsOsKey: String,
-  val repoHostOs: String,
-) {
-  MACOS("macOS", "mac", "macosx"),
-  WINDOWS("Windows", "win", "windows"),
-  LINUX("Linux", "linux", "linux"),
+enum class OsFamily(val displayName: String) {
+  MACOS("macOS"),
+  WINDOWS("Windows"),
+  LINUX("Linux"),
 }
 
 enum class CpuArch(
@@ -31,7 +27,6 @@ data class HostPlatformInfo(
   val osFamily: OsFamily,
   val cpuArch: CpuArch,
   val userHome: Path,
-  val javaHome: Path,
 ) {
   val defaultSdkRoot: Path
     get() =
@@ -72,10 +67,16 @@ data class HostPlatformInfo(
     }
       .distinct()
 
+  /**
+   * Where the emulator looks for AVDs. sdklib's `AndroidLocationsSingleton` also honors
+   * `XDG_CONFIG_HOME`, which the emulator does not, so we resolve this ourselves.
+   */
   val avdHomeDir: Path
     get() {
       val envAvdHome = System.getenv("ANDROID_AVD_HOME")
       if (!envAvdHome.isNullOrBlank()) return Paths.get(envAvdHome)
+      val envUserHome = System.getenv("ANDROID_USER_HOME")
+      if (!envUserHome.isNullOrBlank()) return Paths.get(envUserHome).resolve("avd")
       val envPrefsRoot = System.getenv("ANDROID_PREFS_ROOT") ?: System.getenv("ANDROID_SDK_HOME")
       if (!envPrefsRoot.isNullOrBlank()) {
         val candidate = Paths.get(envPrefsRoot)
@@ -97,13 +98,6 @@ data class HostPlatformInfo(
       OsFamily.MACOS,
       OsFamily.LINUX -> baseName
     }
-
-  fun scriptName(baseName: String): String =
-    when (osFamily) {
-      OsFamily.WINDOWS -> "$baseName.bat"
-      OsFamily.MACOS,
-      OsFamily.LINUX -> baseName
-    }
 }
 
 @SingleIn(AppScope::class)
@@ -115,7 +109,6 @@ class HostPlatformDetector {
     osNameProp: String = System.getProperty("os.name", "generic"),
     osArchProp: String = System.getProperty("os.arch", "x86_64"),
     userHomeProp: String = System.getProperty("user.home", "."),
-    javaHomeProp: String = System.getProperty("java.home", "."),
   ): HostPlatformInfo {
     val osLower = osNameProp.lowercase()
     val osFamily =
@@ -136,7 +129,6 @@ class HostPlatformDetector {
       osFamily = osFamily,
       cpuArch = cpuArch,
       userHome = Paths.get(userHomeProp),
-      javaHome = Paths.get(javaHomeProp),
     )
   }
 }

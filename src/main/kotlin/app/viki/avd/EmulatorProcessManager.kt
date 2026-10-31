@@ -2,20 +2,34 @@ package app.viki.avd
 
 import app.viki.di.AppScope
 import app.viki.sdk.AndroidSdkLocator
+import app.viki.sdk.HostPlatformDetector
 import app.viki.sdk.SdkStatus
+import com.android.adblib.AdbServerChannelProvider
+import com.android.adblib.AdbSession
+import com.android.adblib.AdbSessionHost
+import com.android.adblib.DeviceSelector
+import com.android.adblib.DeviceState
+import com.android.adblib.shellAsText
+import com.android.adblib.tools.EmulatorConsole
+import com.android.adblib.tools.localConsoleAddress
+import com.android.adblib.tools.openEmulatorConsole
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
-import java.nio.file.Path
+import java.time.Duration
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 enum class EmulatorRunStatus {
   STOPPED,
@@ -30,11 +44,14 @@ data class EmulatorInstanceState(
   val lastError: String? = null,
 )
 
-/** All state is confined to Dispatchers.Main; blocking work hops to IO. */
+/**
+ * All state is confined to Dispatchers.Main; blocking work hops to IO, adb calls go through adblib.
+ */
 @SingleIn(AppScope::class)
 @Inject
 class EmulatorProcessManager(
   private val sdkLocator: AndroidSdkLocator,
+  private val platformDetector: HostPlatformDetector,
   private val appScope: CoroutineScope,
 ) {
   private val spawnedProcesses = mutableMapOf<String, Process>()
@@ -43,11 +60,43 @@ class EmulatorProcessManager(
   private val _states = MutableStateFlow<Map<String, EmulatorInstanceState>>(emptyMap())
   val states: StateFlow<Map<String, EmulatorInstanceState>> = _states.asStateFlow()
 
+  private val adbSession: AdbSession by lazy {
+    val host = AdbSessionHost()
+    AdbSession.create(host, AdbServerChannelProvider.createOpenLocalHost(host))
+  }
+
+  /** Online emulator serials, pushed by the adb server. */
+  private var onlineSerials = emptyList<String>()
+  private val avdIdsBySerial = mutableMapOf<String, String>()
+
   init {
     appScope.launch {
+      adbSession.hostServices
+        .trackDevices()
+        .retryWhen { _, _ ->
+          // adb server not running yet (or SDK not set up): start it and reconnect.
+          delay(2.5.seconds)
+          startAdbServer()
+          true
+        }
+        .collect { devices ->
+          onlineSerials =
+            devices.entries
+              .filter {
+                it.serialNumber.startsWith("emulator-") && it.deviceState == DeviceState.ONLINE
+              }
+              .map { it.serialNumber }
+          avdIdsBySerial.keys.retainAll(onlineSerials.toSet())
+          pollRunningEmulators()
+        }
+    }
+    // Nothing pushes boot completion, so poll only while something is booting.
+    appScope.launch {
       while (isActive) {
-        runCatching { pollRunningEmulators() }
-        delay(2_500L)
+        delay(2.5.seconds)
+        if (_states.value.values.any { it.status == EmulatorRunStatus.BOOTING }) {
+          runCatching { pollRunningEmulators() }
+        }
       }
     }
   }
@@ -94,6 +143,8 @@ class EmulatorProcessManager(
             val env = environment()
             env["ANDROID_HOME"] = tools.sdkRoot.toAbsolutePath().toString()
             env["ANDROID_SDK_ROOT"] = tools.sdkRoot.toAbsolutePath().toString()
+            // Pin the emulator to the same AVD folder Viki reads and creates in.
+            env["ANDROID_AVD_HOME"] = platformDetector.current.avdHomeDir.toString()
           }
 
         val process = withContext(Dispatchers.IO) { pb.start() }
@@ -141,23 +192,8 @@ class EmulatorProcessManager(
       }
 
   suspend fun stopAvd(avdId: String): Result<Unit> = runCatching {
-    val currentState = _states.value[avdId]
-    val adbBin = (sdkLocator.sdkStatus.value as? SdkStatus.Ready)?.tools?.adbBin
-
-    if (adbBin != null && currentState?.adbSerial != null) {
-      withContext(Dispatchers.IO) {
-        val killProcess =
-          ProcessBuilder(
-              adbBin.toString(),
-              "-s",
-              currentState.adbSerial,
-              "emu",
-              "kill",
-            )
-            .redirectErrorStream(true)
-            .start()
-        killProcess.waitFor(5, TimeUnit.SECONDS)
-      }
+    _states.value[avdId]?.adbSerial?.let { serial ->
+      runCatching { withEmulatorConsole(serial) { it.kill() } }
     }
 
     spawnedProcesses.remove(avdId)?.let { proc ->
@@ -166,32 +202,24 @@ class EmulatorProcessManager(
       }
     }
 
-    delay(500L)
+    delay(500.milliseconds)
     pollRunningEmulators()
   }
 
   suspend fun pollRunningEmulators() {
-    val adbBin = (sdkLocator.sdkStatus.value as? SdkStatus.Ready)?.tools?.adbBin
     val discoveredByAvdId = linkedMapOf<String, EmulatorInstanceState>()
 
-    if (adbBin != null) {
-      val emulators =
-        withContext(Dispatchers.IO) {
-          queryAdbEmulatorSerials(adbBin).mapNotNull { serial ->
-            val avdId = queryAvdIdForSerial(adbBin, serial) ?: return@mapNotNull null
-            Triple(serial, avdId, isBootCompleted(adbBin, serial))
-          }
-        }
-      for ((serial, avdId, bootCompleted) in emulators) {
-        val runStatus = if (bootCompleted) EmulatorRunStatus.RUNNING else EmulatorRunStatus.BOOTING
-        discoveredByAvdId[avdId] =
-          EmulatorInstanceState(
-            avdId = avdId,
-            status = runStatus,
-            adbSerial = serial,
-            lastError = recentErrors[avdId],
-          )
-      }
+    for (serial in onlineSerials) {
+      val avdId = avdIdForSerial(serial) ?: continue
+      val runStatus =
+        if (isBootCompleted(serial)) EmulatorRunStatus.RUNNING else EmulatorRunStatus.BOOTING
+      discoveredByAvdId[avdId] =
+        EmulatorInstanceState(
+          avdId = avdId,
+          status = runStatus,
+          adbSerial = serial,
+          lastError = recentErrors[avdId],
+        )
     }
 
     // Keep any freshly-spawned processes that haven't registered with adb yet as BOOTING
@@ -223,37 +251,43 @@ class EmulatorProcessManager(
     _states.value = discoveredByAvdId
   }
 
-  private fun queryAdbEmulatorSerials(adbBin: Path): List<String> = runCatching {
-    val proc = ProcessBuilder(adbBin.toString(), "devices").redirectErrorStream(true).start()
-    val lines = proc.inputStream.bufferedReader().use { it.readLines() }
-    proc.waitFor(4, TimeUnit.SECONDS)
-    lines
-      .drop(1)
-      .map { it.trim() }
-      .filter { it.startsWith("emulator-") }
-      .map { it.substringBefore('\t').substringBefore(' ').trim() }
+  private suspend fun startAdbServer() {
+    val adbBin = (sdkLocator.sdkStatus.value as? SdkStatus.Ready)?.tools?.adbBin ?: return
+    withContext(Dispatchers.IO) {
+      runCatching {
+        val proc =
+          ProcessBuilder(adbBin.toString(), "start-server").redirectErrorStream(true).start()
+        proc.outputStream.close()
+        if (!proc.waitFor(10, TimeUnit.SECONDS)) proc.destroyForcibly()
+      }
+    }
   }
-    .getOrDefault(emptyList())
 
-  private fun queryAvdIdForSerial(adbBin: Path, serial: String): String? = runCatching {
-    val proc =
-      ProcessBuilder(adbBin.toString(), "-s", serial, "emu", "avd", "name")
-        .redirectErrorStream(true)
-        .start()
-    val lines = proc.inputStream.bufferedReader().use { it.readLines() }
-    proc.waitFor(3, TimeUnit.SECONDS)
-    lines.map { it.trim() }.firstOrNull { it.isNotEmpty() && it != "OK" && !it.startsWith("KO:") }
-  }
-    .getOrNull()
+  private suspend fun avdIdForSerial(serial: String): String? =
+    avdIdsBySerial[serial]
+      ?: runCatching { withEmulatorConsole(serial) { it.avdName() } }
+        .getOrNull()
+        ?.also { avdIdsBySerial[serial] = it }
 
-  private fun isBootCompleted(adbBin: Path, serial: String): Boolean = runCatching {
-    val proc =
-      ProcessBuilder(adbBin.toString(), "-s", serial, "shell", "getprop", "sys.boot_completed")
-        .redirectErrorStream(true)
-        .start()
-    val out = proc.inputStream.bufferedReader().use { it.readText().trim() }
-    proc.waitFor(3, TimeUnit.SECONDS)
-    out == "1"
+  private suspend fun isBootCompleted(serial: String): Boolean = runCatching {
+    adbSession.deviceServices
+      .shellAsText(
+        DeviceSelector.fromSerialNumber(serial),
+        "getprop sys.boot_completed",
+        commandTimeout = Duration.ofSeconds(3),
+      )
+      .stdout
+      .trim() == "1"
   }
     .getOrDefault(false)
+
+  private suspend fun <T> withEmulatorConsole(
+    serial: String,
+    block: suspend (EmulatorConsole) -> T,
+  ): T {
+    val port = serial.removePrefix("emulator-").toInt()
+    return withTimeout(3.seconds) {
+      adbSession.openEmulatorConsole(localConsoleAddress(port)).use { block(it) }
+    }
+  }
 }
