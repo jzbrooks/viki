@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#28312D"/>
+      <stop offset="55%" stop-color="#1E2224"/>
+      <stop offset="100%" stop-color="#151719"/>
+    </linearGradient>
+
+    <radialGradient id="glowGrad" cx="512" cy="490" r="428.5" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3DDC84" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#3DDC84" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="borderGrad" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3DDC84" stop-opacity="0.37"/>
+      <stop offset="100%" stop-color="#3E4147" stop-opacity="0.55"/>
+    </linearGradient>
+
+    <linearGradient id="bugGrad" x1="0" y1="215" x2="0" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#52EA97"/>
+      <stop offset="100%" stop-color="#30C772"/>
+    </linearGradient>
+
+    <filter id="tileShadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+
+    <path
+      id="androidBug"
+      d="M40,720q9-107 65.5-197T256,380l-74-128q-6-9-3-19t13-15q8-5 18-2t16,12l74,128q86-36 180-36t180,36l74-128q6-9 16-12t18,2q10,5 13,15t-3,19l-74,128q94,53 150.5,143T920,720H40Zm240-110q21,0 35.5-14.5T330,560q0-21-14.5-35.5T280,510q-21,0-35.5,14.5T230,560q0,21 14.5,35.5T280,610Zm400,0q21,0 35.5-14.5T730,560q0-21-14.5-35.5T680,510q-21,0-35.5,14.5T630,560q0,21 14.5,35.5T680,610Z"/>
+
+    <g id="bugItem">
+      <use href="#androidBug" y="30.77" fill="#000000" fill-opacity="0.37"/>
+      <use href="#androidBug" fill="url(#bugGrad)"/>
+    </g>
+  </defs>
+
+  <!-- Squircle Tile -->
+  <rect
+    x="100"
+    y="100"
+    width="824"
+    height="824"
+    rx="185"
+    ry="185"
+    fill="url(#bgGrad)"
+    filter="url(#tileShadow)"/>
+
+  <!-- Ambient Emerald Glow -->
+  <rect
+    x="100"
+    y="100"
+    width="824"
+    height="824"
+    rx="185"
+    ry="185"
+    fill="url(#glowGrad)"/>
+
+  <!-- Subtle Inner Border -->
+  <rect
+    x="102"
+    y="102"
+    width="820"
+    height="820"
+    rx="183"
+    ry="183"
+    fill="none"
+    stroke="url(#borderGrad)"
+    stroke-width="4"/>
+
+  <!-- 3x3 Android Bug Grid -->
+  <!-- Row 1 -->
+  <use href="#bugItem" transform="translate(211.73, 234.17) scale(0.195)"/>
+  <use href="#bugItem" transform="translate(418.40, 234.17) scale(0.195)"/>
+  <use href="#bugItem" transform="translate(625.07, 234.17) scale(0.195)"/>
+
+  <!-- Row 2 -->
+  <use href="#bugItem" transform="translate(211.73, 420.84) scale(0.195)"/>
+  <use href="#bugItem" transform="translate(418.40, 420.84) scale(0.195)"/>
+  <use href="#bugItem" transform="translate(625.07, 420.84) scale(0.195)"/>
+
+  <!-- Row 3 -->
+  <use href="#bugItem" transform="translate(211.73, 607.50) scale(0.195)"/>
+  <use href="#bugItem" transform="translate(418.40, 607.50) scale(0.195)"/>
+  <use href="#bugItem" transform="translate(625.07, 607.50) scale(0.195)"/>
+</svg>

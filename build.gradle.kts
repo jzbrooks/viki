@@ -72,6 +72,10 @@ compose.desktop {
       packageVersion = "1.0.0"
       description = "Designer-First Android Virtual Device Manager"
       vendor = "Viki"
+
+      macOS { iconFile.set(project.file("src/main/packaging/viki.icns")) }
+      windows { iconFile.set(project.file("src/main/packaging/viki.ico")) }
+      linux { iconFile.set(project.file("src/main/packaging/viki.png")) }
     }
   }
 }

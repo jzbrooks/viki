@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -27,6 +28,7 @@ import app.viki.avd.EmulatorRunStatus
 import app.viki.di.VikiAppGraph
 import app.viki.resources.Res
 import app.viki.resources.android
+import app.viki.resources.app_icon
 import app.viki.sdk.SdkStatus
 import app.viki.ui.screens.CreateDeviceScreen
 import app.viki.ui.screens.DeviceListScreen
@@ -39,7 +41,10 @@ import com.slack.circuit.foundation.NavigableCircuitContent
 import com.slack.circuit.foundation.rememberCircuitNavigator
 import com.slack.circuit.runtime.screen.Screen
 import dev.zacsweers.metro.createGraph
+import java.awt.Taskbar
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.imageResource
+import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.vectorResource
 
 fun main() = application {
@@ -57,6 +62,18 @@ fun main() = application {
       size = DpSize(1160.dp, 760.dp),
       position = WindowPosition.Aligned(Alignment.Center),
     )
+
+  val appIconPainter = painterResource(Res.drawable.app_icon)
+  val appIconBitmap = imageResource(Res.drawable.app_icon)
+
+  LaunchedEffect(appIconBitmap) {
+    if (Taskbar.isTaskbarSupported()) {
+      val taskbar = Taskbar.getTaskbar()
+      if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
+        runCatching { taskbar.iconImage = appIconBitmap.toAwtImage() }
+      }
+    }
+  }
 
   LaunchedEffect(sdkStatus) {
     appGraph.avdRepository.ensureLoaded()
@@ -171,6 +188,7 @@ fun main() = application {
       },
       state = windowState,
       title = "Viki — Android Virtual Device Manager",
+      icon = appIconPainter,
     ) {
       VikiTheme {
         CircuitCompositionLocals(appGraph.circuit) {

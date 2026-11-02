@@ -1,4 +1,8 @@
-# Viki
+<div style="display: flex; align-items: center; gap: 12px;">
+  <img src="docs/icon.svg" width="64" height="64" alt="Viki" />
+  <h1 style="margin: 0;">Viki</h1>
+</div>
+
 ![build](https://github.com/jzbrooks/viki/actions/workflows/build.yml/badge.svg)
 
 A designer-first Android Virtual Device manager for macOS, Windows, and Linux. You can create, launch, and manage emulators without installing Android Studio.
