@@ -1,7 +1,7 @@
-<div style="display: flex; align-items: center; gap: 12px;">
-  <img src="docs/icon.svg" width="64" height="64" alt="Viki" />
-  <h1 style="margin: 0;">Viki</h1>
-</div>
+<h1>
+  <img src="docs/icon.svg" width="64" height="64" align="center" alt="Viki" />
+  Viki
+</h1>
 
 ![build](https://github.com/jzbrooks/viki/actions/workflows/build.yml/badge.svg)
 
