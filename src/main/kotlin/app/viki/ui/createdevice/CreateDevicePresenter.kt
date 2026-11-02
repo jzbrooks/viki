@@ -103,6 +103,7 @@ fun CreateDevicePresenter(
         if (creationProgress != null) return@State
         errorMessage = null
         scope.launch {
+          var failed = false
           avdRepository
             .createDesignerAvd(
               displayName =
@@ -111,17 +112,16 @@ fun CreateDevicePresenter(
               releasePreset = selectedRelease.preset,
             )
             .catch { err ->
+              failed = true
               errorMessage = err.message ?: "Failed to create virtual device."
               creationProgress = null
             }
-            .collect { progress ->
-              creationProgress = progress
-              if (progress.fraction != null && progress.fraction >= 1.0f) {
-                refreshTrigger++
-                creationProgress = null
-                navigator.pop()
-              }
-            }
+            .collect { progress -> creationProgress = progress }
+          if (!failed) {
+            refreshTrigger++
+            creationProgress = null
+            navigator.pop()
+          }
         }
       }
 

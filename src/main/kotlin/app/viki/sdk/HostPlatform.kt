@@ -27,13 +27,14 @@ data class HostPlatformInfo(
   val osFamily: OsFamily,
   val cpuArch: CpuArch,
   val userHome: Path,
+  private val envProvider: (String) -> String? = System::getenv,
 ) {
   val defaultSdkRoot: Path
     get() =
       when (osFamily) {
         OsFamily.MACOS -> userHome.resolve("Library/Android/sdk")
         OsFamily.WINDOWS -> {
-          val localAppData = System.getenv("LOCALAPPDATA")
+          val localAppData = envProvider("LOCALAPPDATA")
           if (!localAppData.isNullOrBlank()) {
             Paths.get(localAppData, "Android", "Sdk")
           } else {
@@ -73,11 +74,11 @@ data class HostPlatformInfo(
    */
   val avdHomeDir: Path
     get() {
-      val envAvdHome = System.getenv("ANDROID_AVD_HOME")
+      val envAvdHome = envProvider("ANDROID_AVD_HOME")
       if (!envAvdHome.isNullOrBlank()) return Paths.get(envAvdHome)
-      val envUserHome = System.getenv("ANDROID_USER_HOME")
+      val envUserHome = envProvider("ANDROID_USER_HOME")
       if (!envUserHome.isNullOrBlank()) return Paths.get(envUserHome).resolve("avd")
-      val envPrefsRoot = System.getenv("ANDROID_PREFS_ROOT") ?: System.getenv("ANDROID_SDK_HOME")
+      val envPrefsRoot = envProvider("ANDROID_PREFS_ROOT") ?: envProvider("ANDROID_SDK_HOME")
       if (!envPrefsRoot.isNullOrBlank()) {
         val candidate = Paths.get(envPrefsRoot)
         return if (candidate.fileName?.toString() == ".android") {
@@ -102,13 +103,20 @@ data class HostPlatformInfo(
 
 @SingleIn(AppScope::class)
 @Inject
-class HostPlatformDetector {
-  val current: HostPlatformInfo by lazy { detect() }
+class HostPlatformDetector() {
+  private var overridePlatform: HostPlatformInfo? = null
+
+  internal constructor(platform: HostPlatformInfo) : this() {
+    this.overridePlatform = platform
+  }
+
+  val current: HostPlatformInfo by lazy { overridePlatform ?: detect() }
 
   fun detect(
     osNameProp: String = System.getProperty("os.name", "generic"),
     osArchProp: String = System.getProperty("os.arch", "x86_64"),
     userHomeProp: String = System.getProperty("user.home", "."),
+    envProvider: (String) -> String? = System::getenv,
   ): HostPlatformInfo {
     val osLower = osNameProp.lowercase()
     val osFamily =
@@ -129,6 +137,7 @@ class HostPlatformDetector {
       osFamily = osFamily,
       cpuArch = cpuArch,
       userHome = Paths.get(userHomeProp),
+      envProvider = envProvider,
     )
   }
 }

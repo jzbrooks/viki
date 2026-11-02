@@ -92,19 +92,19 @@ fun SdkSetupPresenter(
         if (installProgress != null) return@State
         errorMessage = null
         scope.launch {
+          var failed = false
           sdkInstaller
             .installOrRepairSdk(targetSdkPath)
             .catch { err ->
+              failed = true
               errorMessage = err.message ?: "Failed to install Android SDK."
               installProgress = null
             }
-            .collect { progress ->
-              installProgress = progress
-              if (progress.fraction != null && progress.fraction >= 1.0f) {
-                installProgress = null
-                navigator.resetRoot(DeviceListScreen)
-              }
-            }
+            .collect { progress -> installProgress = progress }
+          if (!failed) {
+            installProgress = null
+            navigator.resetRoot(DeviceListScreen)
+          }
         }
       }
 

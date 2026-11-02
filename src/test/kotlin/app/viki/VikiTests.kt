@@ -10,20 +10,25 @@ import app.viki.sdk.CpuArch
 import app.viki.sdk.HostPlatformDetector
 import app.viki.sdk.OsFamily
 import app.viki.sdk.SdkStatus
+import app.viki.ui.createdevice.CreateDevicePresenter
 import app.viki.ui.screens.CreateDeviceScreen
 import app.viki.ui.screens.DeviceListScreen
 import app.viki.ui.screens.SdkSetupScreen
 import com.slack.circuit.runtime.CircuitContext
 import com.slack.circuit.runtime.InternalCircuitApi
 import com.slack.circuit.runtime.Navigator
+import com.slack.circuit.runtime.presenter.presenterOf
 import com.slack.circuit.test.FakeNavigator
 import com.slack.circuit.test.test
 import dev.zacsweers.metro.createGraph
 import java.nio.file.Files
+import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 
 class VikiTests {
@@ -197,5 +202,194 @@ class VikiTests {
 
       cancelAndIgnoreRemainingEvents()
     }
+  }
+
+  @Test
+  fun `createDesignerAvd creates emulator on first attempt with preinstalled system image and no platform package`() =
+    runTest {
+      val tempHome = Files.createTempDirectory("viki-test-home")
+      try {
+        val baseDetector = HostPlatformDetector()
+        val isolatedPlatform =
+          baseDetector.detect(
+            osNameProp = "Mac OS X",
+            osArchProp = "aarch64",
+            userHomeProp = tempHome.toString(),
+            envProvider = { null },
+          )
+        val detector = HostPlatformDetector(isolatedPlatform)
+        val sdkRoot = isolatedPlatform.defaultSdkRoot
+        populateSdkTools(sdkRoot, detector)
+
+        val locator = AndroidSdkLocator(detector)
+        assertTrue(locator.sdkStatus.value is SdkStatus.Ready)
+
+        val installer = AndroidSdkInstaller(locator)
+        val repo = AvdRepository(detector, locator, installer)
+        // Warm up sdklib caches before the system image exists on disk
+        Files.createDirectories(isolatedPlatform.avdHomeDir)
+        repo.refreshDevices()
+
+        populateSystemImage(sdkRoot, detector, apiLevel = 33)
+
+        val release33 = DesignerCatalog.androidReleases.first { it.apiLevel == 33 }
+        assertTrue(repo.isReleaseSystemImageInstalled(release33))
+        assertFalse(installer.isPackageInstalledOnDisk(sdkRoot, release33.platformPackage))
+
+        val preset = DesignerCatalog.devicePresets.first { it.id == "pixel_8a" }
+        val progressSteps =
+          repo
+            .createDesignerAvd(
+              displayName = "Pixel 8a (Android 13)",
+              devicePreset = preset,
+              releasePreset = release33,
+            )
+            .toList()
+
+        assertTrue(progressSteps.isNotEmpty())
+        assertEquals(1.0f, progressSteps.last().fraction)
+        // Ensure no intermediate step prematurely emitted fraction >= 1.0f
+        assertTrue(progressSteps.dropLast(1).none { (it.fraction ?: 0f) >= 1.0f })
+
+        val createdDevices = repo.devices.value
+        assertEquals(1, createdDevices.size)
+        val created = createdDevices.first()
+        assertEquals("Pixel_8a_Android_13", created.avdId)
+        assertEquals("Pixel 8a (Android 13)", created.displayName)
+        assertEquals(33, created.apiLevel)
+        assertEquals(preset.widthPx, created.widthPx)
+        assertEquals(preset.heightPx, created.heightPx)
+        assertEquals(preset.densityDpi, created.densityDpi)
+      } finally {
+        tempHome.toFile().deleteRecursively()
+      }
+    }
+
+  @Test
+  fun `CreateDevicePresenter completes AVD creation before popping screen`() = runTest {
+    val tempHome = Files.createTempDirectory("viki-test-presenter-home")
+    try {
+      val baseDetector = HostPlatformDetector()
+      val isolatedPlatform =
+        baseDetector.detect(
+          osNameProp = "Mac OS X",
+          osArchProp = "aarch64",
+          userHomeProp = tempHome.toString(),
+          envProvider = { null },
+        )
+      val detector = HostPlatformDetector(isolatedPlatform)
+      val sdkRoot = isolatedPlatform.defaultSdkRoot
+      populateCompleteSdkWithSystemImage(sdkRoot, detector, apiLevel = 33)
+
+      val locator = AndroidSdkLocator(detector)
+      val installer = AndroidSdkInstaller(locator)
+      val repo = AvdRepository(detector, locator, installer)
+      val navigator = FakeNavigator(CreateDeviceScreen)
+
+      val presenter = presenterOf {
+        CreateDevicePresenter(
+          navigator = navigator,
+          platformDetector = detector,
+          avdRepository = repo,
+        )
+      }
+
+      presenter.test {
+        val initial = awaitItem()
+        val release33Option = initial.releaseOptions.first { it.preset.apiLevel == 33 }
+        assertTrue(release33Option.isSystemImageDownloaded)
+
+        initial.eventSink(CreateDeviceScreen.Event.SelectRelease(release33Option))
+        var state = awaitItem()
+        while (state.selectedRelease.preset.apiLevel != 33) {
+          state = awaitItem()
+        }
+
+        state.eventSink(CreateDeviceScreen.Event.CreateClicked)
+        navigator.awaitPop()
+
+        assertEquals(1, repo.devices.value.size)
+        assertEquals("Pixel 9 Pro (Android 13)", repo.devices.value.first().displayName)
+        cancelAndIgnoreRemainingEvents()
+      }
+    } finally {
+      tempHome.toFile().deleteRecursively()
+    }
+  }
+
+  private fun populateCompleteSdkWithSystemImage(
+    sdkRoot: Path,
+    detector: HostPlatformDetector,
+    apiLevel: Int,
+  ) {
+    populateSdkTools(sdkRoot, detector)
+    populateSystemImage(sdkRoot, detector, apiLevel)
+  }
+
+  private fun populateSdkTools(
+    sdkRoot: Path,
+    detector: HostPlatformDetector,
+  ) {
+    val platform = detector.current
+    val platformTools = sdkRoot.resolve("platform-tools")
+    Files.createDirectories(platformTools)
+    Files.writeString(platformTools.resolve(platform.executableName("adb")), "#!/bin/sh\n")
+
+    val emulatorDir = sdkRoot.resolve("emulator")
+    Files.createDirectories(emulatorDir)
+    Files.writeString(emulatorDir.resolve(platform.executableName("emulator")), "#!/bin/sh\n")
+  }
+
+  private fun populateSystemImage(
+    sdkRoot: Path,
+    detector: HostPlatformDetector,
+    apiLevel: Int,
+  ) {
+    val platform = detector.current
+    val abi = platform.cpuArch.abiName
+    val sysImgDir = sdkRoot.resolve("system-images/android-$apiLevel/google_apis_playstore/$abi")
+    Files.createDirectories(sysImgDir)
+    Files.writeString(sysImgDir.resolve("system.img"), "fake-system-img")
+    Files.writeString(sysImgDir.resolve("userdata.img"), "fake-userdata-img")
+    Files.writeString(
+      sysImgDir.resolve("build.prop"),
+      """
+      ro.product.cpu.abi=$abi
+      ro.build.version.sdk=$apiLevel
+      """
+        .trimIndent(),
+    )
+    Files.writeString(
+      sysImgDir.resolve("package.xml"),
+      """
+      <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+      <ns2:repository
+          xmlns:ns2="http://schemas.android.com/repository/android/common/02"
+          xmlns:ns14="http://schemas.android.com/sdk/android/repo/sys-img2/05"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <localPackage path="system-images;android-$apiLevel;google_apis_playstore;$abi" obsolete="false">
+          <type-details xsi:type="ns14:sysImgDetailsType">
+            <api-level>$apiLevel</api-level>
+            <base-extension>true</base-extension>
+            <tag>
+              <id>google_apis_playstore</id>
+              <display>Google Play</display>
+            </tag>
+            <vendor>
+              <id>google</id>
+              <display>Google Inc.</display>
+            </vendor>
+            <abi>$abi</abi>
+            <abis>$abi</abis>
+          </type-details>
+          <revision>
+            <major>9</major>
+          </revision>
+          <display-name>Google Play ARM 64 v8a System Image</display-name>
+        </localPackage>
+      </ns2:repository>
+      """
+        .trimIndent(),
+    )
   }
 }

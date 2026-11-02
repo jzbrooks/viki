@@ -18,6 +18,7 @@ import dev.zacsweers.metro.SingleIn
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.isDirectory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 data class AvdDevice(
@@ -108,7 +110,7 @@ class AvdRepository(
 
   /**
    * Guided designer workflow:
-   * 1. Ensures the platform (`platforms;android-<api>`) and system image are installed.
+   * 1. Ensures the system image is installed.
    * 2. Creates the AVD with the matching device profile.
    * 3. Applies designer-friendly hardware defaults to its `config.ini`.
    */
@@ -133,40 +135,42 @@ class AvdRepository(
         else -> preferredImagePkg
       }
 
-    val packagesNeeded = buildList {
-      if (!sdkInstaller.isPackageInstalledOnDisk(tools.sdkRoot, releasePreset.platformPackage)) {
-        add(releasePreset.platformPackage)
-      }
-      if (!sdkInstaller.isPackageInstalledOnDisk(tools.sdkRoot, chosenSystemImagePkg)) {
-        add(chosenSystemImagePkg)
-      }
-    }
-
     var finalSystemImagePkg = chosenSystemImagePkg
 
-    if (packagesNeeded.isNotEmpty()) {
+    if (!sdkInstaller.isPackageInstalledOnDisk(tools.sdkRoot, chosenSystemImagePkg)) {
       val downloadResult = runCatching {
         emitAll(
-          sdkInstaller.installSdkPackages(
-            packages = packagesNeeded,
-            stageTitle =
-              "Downloading ${releasePreset.displayTitle} System Image (${hostArch.abiName})",
-          )
+          sdkInstaller
+            .installSdkPackages(
+              packages = listOf(chosenSystemImagePkg),
+              stageTitle =
+                "Downloading ${releasePreset.displayTitle} System Image (${hostArch.abiName})",
+            )
+            .map { progress ->
+              progress.copy(fraction = progress.fraction?.let { (it * 0.88f).coerceIn(0f, 0.88f) })
+            }
         )
+      }
+      val downloadException = downloadResult.exceptionOrNull()
+      if (downloadException is CancellationException) {
+        throw downloadException
       }
       if (downloadResult.isFailure && chosenSystemImagePkg == preferredImagePkg) {
         // Fallback to google_apis if google_apis_playstore is unavailable for a preview API level
         finalSystemImagePkg = fallbackImagePkg
-        val fallbackPackages = listOf(releasePreset.platformPackage, fallbackImagePkg)
         emitAll(
-          sdkInstaller.installSdkPackages(
-            packages = fallbackPackages,
-            stageTitle =
-              "Downloading ${releasePreset.displayTitle} Google APIs Image (${hostArch.abiName})",
-          )
+          sdkInstaller
+            .installSdkPackages(
+              packages = listOf(fallbackImagePkg),
+              stageTitle =
+                "Downloading ${releasePreset.displayTitle} Google APIs Image (${hostArch.abiName})",
+            )
+            .map { progress ->
+              progress.copy(fraction = progress.fraction?.let { (it * 0.88f).coerceIn(0f, 0.88f) })
+            }
         )
-      } else if (downloadResult.isFailure) {
-        throw downloadResult.exceptionOrNull()!!
+      } else if (downloadException != null) {
+        throw downloadException
       }
     }
 
@@ -180,6 +184,9 @@ class AvdRepository(
 
     val avdId = sanitizeAvdId(displayName)
     val sdkHandler = AndroidSdkHandler.getInstance(AndroidLocationsSingleton, tools.sdkRoot)
+    val repoManager = sdkHandler.getRepoManager(NoOpProgress)
+    repoManager.markLocalCacheInvalid()
+    repoManager.reloadLocalIfNeeded(NoOpProgress)
     val deviceManager = DeviceManager.createInstance(sdkHandler, logger)
     val device =
       devicePreset.avdManagerDeviceIds.firstNotNullOfOrNull {

@@ -138,15 +138,27 @@ class AndroidSdkInstaller(private val sdkLocator: AndroidSdkLocator) {
           trySend(SdkInstallProgress(stageTitle, text, overall.toFloat().coerceIn(0f, 1f)))
         }
       }
-    progress.setText(text)
+    val metadataProgress =
+      object : ProgressIndicatorAdapter() {
+        override fun setText(s: String?) {
+          text = s ?: return
+          trySend(SdkInstallProgress(stageTitle, text, null))
+        }
+
+        override fun logError(s: String, e: Throwable?) {
+          lastError = s
+        }
+      }
+    metadataProgress.setText(text)
 
     val handler = AndroidSdkHandler.getInstance(AndroidLocationsSingleton, sdkRoot)
-    val repoManager = handler.getRepoManager(progress)
-    repoManager.loadSynchronously(0, progress, downloader, settings)
+    val repoManager = handler.getRepoManager(metadataProgress)
+    repoManager.loadSynchronously(0, metadataProgress, downloader, settings)
     val remotePackages = repoManager.packages.remotePackages
 
     for ((index, packageId) in packages.withIndex()) {
       packageIndex = index
+      progress.setFraction(0.0)
       val remote =
         remotePackages[packageId]
           ?: error("$packageId is not available from Google's SDK repository")
@@ -157,6 +169,7 @@ class AndroidSdkInstaller(private val sdkLocator: AndroidSdkLocator) {
       }
     }
     repoManager.markLocalCacheInvalid()
+    repoManager.reloadLocalIfNeeded(metadataProgress)
 
     send(SdkInstallProgress(stageTitle, "Installed ${packages.joinToString(", ")}", 1.0f))
   }
