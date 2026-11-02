@@ -3,17 +3,25 @@ package app.viki
 import app.viki.avd.AvdRepository
 import app.viki.avd.DesignerCatalog
 import app.viki.avd.DeviceFormFactor
+import app.viki.avd.EmulatorProcessManager
 import app.viki.di.VikiAppGraph
 import app.viki.sdk.AndroidSdkInstaller
 import app.viki.sdk.AndroidSdkLocator
 import app.viki.sdk.CpuArch
 import app.viki.sdk.HostPlatformDetector
 import app.viki.sdk.OsFamily
+import app.viki.sdk.SdkInstallProgress
 import app.viki.sdk.SdkStatus
 import app.viki.ui.createdevice.CreateDevicePresenter
+import app.viki.ui.devicelist.DeviceListPresenter
 import app.viki.ui.screens.CreateDeviceScreen
 import app.viki.ui.screens.DeviceListScreen
 import app.viki.ui.screens.SdkSetupScreen
+import com.android.repository.Revision
+import com.android.repository.api.LocalPackage
+import com.android.repository.api.RemotePackage
+import com.android.repository.api.RepoPackage
+import com.android.repository.impl.meta.RepositoryPackages
 import com.slack.circuit.runtime.CircuitContext
 import com.slack.circuit.runtime.InternalCircuitApi
 import com.slack.circuit.runtime.Navigator
@@ -21,12 +29,14 @@ import com.slack.circuit.runtime.presenter.presenterOf
 import com.slack.circuit.test.FakeNavigator
 import com.slack.circuit.test.test
 import dev.zacsweers.metro.createGraph
+import java.lang.reflect.Proxy
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -316,6 +326,175 @@ class VikiTests {
       tempHome.toFile().deleteRecursively()
     }
   }
+
+  @Test
+  fun `AndroidSdkInstaller filters updatable packages to Viki-managed SDK components`() {
+    val detector = HostPlatformDetector()
+    val locator = AndroidSdkLocator(detector)
+    val installer = AndroidSdkInstaller(locator)
+
+    assertTrue(installer.isVikiManagedPackage("platform-tools"))
+    assertTrue(installer.isVikiManagedPackage("emulator"))
+    assertTrue(
+      installer.isVikiManagedPackage("system-images;android-35;google_apis_playstore;arm64-v8a")
+    )
+    assertFalse(installer.isVikiManagedPackage("build-tools;35.0.0"))
+    assertFalse(installer.isVikiManagedPackage("platforms;android-35"))
+
+    val localPkgs =
+      listOf(
+        fakeLocalPackage("platform-tools", Revision(35, 0, 1)),
+        fakeLocalPackage("emulator", Revision(35, 1, 4)),
+        fakeLocalPackage(
+          "system-images;android-35;google_apis_playstore;arm64-v8a",
+          Revision(8),
+        ),
+        fakeLocalPackage("platforms;android-35", Revision(1)),
+      )
+
+    val remotePkgs =
+      listOf(
+        // Outdated platform-tools -> should update
+        fakeRemotePackage("platform-tools", Revision(35, 0, 2)),
+        // Up-to-date emulator -> should not update
+        fakeRemotePackage("emulator", Revision(35, 1, 4)),
+        // Outdated system image -> should update
+        fakeRemotePackage(
+          "system-images;android-35;google_apis_playstore;arm64-v8a",
+          Revision(9),
+        ),
+        // Outdated unmanaged package -> should not update
+        fakeRemotePackage("platforms;android-35", Revision(2)),
+        // Uninstalled remote system image -> should not update
+        fakeRemotePackage(
+          "system-images;android-36;google_apis_playstore;arm64-v8a",
+          Revision(1),
+        ),
+      )
+
+    val repoPackages = RepositoryPackages(localPkgs, remotePkgs)
+    val updatable = installer.findUpdatablePackages(repoPackages)
+
+    assertEquals(
+      listOf(
+        "platform-tools",
+        "system-images;android-35;google_apis_playstore;arm64-v8a",
+      ),
+      updatable.map { it.path },
+    )
+  }
+
+  @Test
+  fun `DeviceListPresenter surfaces background SDK update progress and dismissible errors`() =
+    runTest {
+      val tempHome = Files.createTempDirectory("viki-test-devicelist-home")
+      try {
+        val baseDetector = HostPlatformDetector()
+        val isolatedPlatform =
+          baseDetector.detect(
+            osNameProp = "Mac OS X",
+            osArchProp = "aarch64",
+            userHomeProp = tempHome.toString(),
+            envProvider = { null },
+          )
+        val detector = HostPlatformDetector(isolatedPlatform)
+        val sdkRoot = isolatedPlatform.defaultSdkRoot
+        populateSdkTools(sdkRoot, detector)
+
+        val locator = AndroidSdkLocator(detector)
+        val installer = AndroidSdkInstaller(locator)
+        val repo = AvdRepository(detector, locator, installer)
+        val emulatorManager = EmulatorProcessManager(locator, detector, backgroundScope)
+        val navigator = FakeNavigator(DeviceListScreen)
+
+        val presenter = presenterOf {
+          DeviceListPresenter(
+            navigator = navigator,
+            platformDetector = detector,
+            sdkLocator = locator,
+            sdkInstaller = installer,
+            avdRepository = repo,
+            emulatorManager = emulatorManager,
+          )
+        }
+
+        presenter.test {
+          var state = awaitItem()
+          assertTrue(state.isLoading)
+          assertNull(state.sdkUpdateProgress)
+          assertNull(state.sdkUpdateError)
+
+          while (state.isLoading) {
+            state = awaitItem()
+          }
+          assertFalse(state.isLoading)
+
+          val progress =
+            SdkInstallProgress(
+              stageTitle = "Updating Android SDK",
+              detailMessage = "Updating Android Emulator (35.1.4 -> 35.2.1)...",
+              fraction = 0.5f,
+            )
+          installer.setUpdateStateForTesting(progress = progress)
+          while (state.sdkUpdateProgress != progress) {
+            state = awaitItem()
+          }
+          assertEquals(progress, state.sdkUpdateProgress)
+
+          installer.setUpdateStateForTesting(
+            progress = null,
+            error = "Network connection lost while updating emulator",
+          )
+          while (state.sdkUpdateError == null || state.sdkUpdateProgress != null) {
+            state = awaitItem()
+          }
+          assertNull(state.sdkUpdateProgress)
+          assertEquals("Network connection lost while updating emulator", state.sdkUpdateError)
+
+          state.eventSink(DeviceListScreen.Event.DismissSdkUpdateError)
+          while (state.sdkUpdateError != null) {
+            state = awaitItem()
+          }
+          assertNull(state.sdkUpdateError)
+
+          cancelAndIgnoreRemainingEvents()
+        }
+      } finally {
+        tempHome.toFile().deleteRecursively()
+      }
+    }
+
+  private fun fakeLocalPackage(path: String, revision: Revision): LocalPackage =
+    fakeRepoPackage(LocalPackage::class.java, path, revision)
+
+  private fun fakeRemotePackage(path: String, revision: Revision): RemotePackage =
+    fakeRepoPackage(RemotePackage::class.java, path, revision)
+
+  @Suppress("UNCHECKED_CAST")
+  private fun <T : RepoPackage> fakeRepoPackage(
+    iface: Class<T>,
+    path: String,
+    revision: Revision,
+  ): T =
+    Proxy.newProxyInstance(
+      iface.classLoader,
+      arrayOf(iface),
+    ) { proxy, method, args ->
+      when (method.name) {
+        "getPath" -> path
+        "getVersion" -> revision
+        "getDisplayName" -> path
+        "obsolete" -> false
+        "compareTo" -> {
+          val other = args?.firstOrNull() as? RepoPackage ?: return@newProxyInstance 0
+          path.compareTo(other.path)
+        }
+        "equals" -> proxy === args?.firstOrNull()
+        "hashCode" -> System.identityHashCode(proxy)
+        "toString" -> "$path@$revision"
+        else -> null
+      }
+    } as T
 
   private fun populateCompleteSdkWithSystemImage(
     sdkRoot: Path,

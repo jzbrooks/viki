@@ -34,6 +34,8 @@ fun SdkSetupPresenter(
   sdkInstaller: AndroidSdkInstaller,
 ): SdkSetupScreen.State {
   val sdkStatus by sdkLocator.sdkStatus.collectAsState()
+  val backgroundUpdateProgress by sdkInstaller.updateProgress.collectAsState()
+  val backgroundUpdateError by sdkInstaller.updateError.collectAsState()
   val scope = rememberCoroutineScope()
   val platform = platformDetector.current
 
@@ -83,14 +85,15 @@ fun SdkSetupPresenter(
     isIncomplete = isIncomplete,
     missingComponents = missingComponents,
     searchedPaths = searchedPaths,
-    installProgress = installProgress,
-    errorMessage = errorMessage,
+    installProgress = installProgress ?: backgroundUpdateProgress,
+    errorMessage = errorMessage ?: backgroundUpdateError,
     canDismiss = isReady,
   ) { event ->
     when (event) {
       SdkSetupScreen.Event.InstallOrRepairClicked -> {
-        if (installProgress != null) return@State
+        if (installProgress != null || backgroundUpdateProgress != null) return@State
         errorMessage = null
+        sdkInstaller.dismissUpdateError()
         scope.launch {
           var failed = false
           sdkInstaller
@@ -108,8 +111,16 @@ fun SdkSetupPresenter(
         }
       }
 
+      SdkSetupScreen.Event.CheckForUpdatesClicked -> {
+        if (installProgress != null || backgroundUpdateProgress != null) return@State
+        errorMessage = null
+        sdkInstaller.dismissUpdateError()
+        scope.launch { sdkInstaller.checkAndInstallUpdates(silentCheckFailure = false) }
+      }
+
       is SdkSetupScreen.Event.CustomPathSelected -> {
         errorMessage = null
+        sdkInstaller.dismissUpdateError()
         val path = runCatching { Paths.get(event.path.trim()) }.getOrNull()
         if (path != null) {
           val updated = sdkLocator.setCustomSdkRoot(path)
@@ -123,6 +134,7 @@ fun SdkSetupPresenter(
 
       SdkSetupScreen.Event.ReScanClicked -> {
         errorMessage = null
+        sdkInstaller.dismissUpdateError()
         val refreshed = sdkLocator.refresh()
         if (refreshed is SdkStatus.Ready && screen.allowAutoRedirect) {
           navigator.resetRoot(DeviceListScreen)
@@ -137,6 +149,7 @@ fun SdkSetupPresenter(
 
       SdkSetupScreen.Event.DismissError -> {
         errorMessage = null
+        sdkInstaller.dismissUpdateError()
       }
     }
   }

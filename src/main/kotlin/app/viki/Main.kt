@@ -46,9 +46,11 @@ fun main() = application {
   val appGraph = remember { createGraph<VikiAppGraph>() }
   val devices by appGraph.avdRepository.devices.collectAsState()
   val emulatorStates by appGraph.emulatorProcessManager.states.collectAsState()
+  val sdkStatus by appGraph.sdkLocator.sdkStatus.collectAsState()
 
   var isWindowVisible by remember { mutableStateOf(true) }
   var pendingScreen by remember { mutableStateOf<Screen?>(null) }
+  var hasCheckedForUpdatesOnLaunch by remember { mutableStateOf(false) }
 
   val windowState =
     rememberWindowState(
@@ -56,9 +58,16 @@ fun main() = application {
       position = WindowPosition.Aligned(Alignment.Center),
     )
 
-  LaunchedEffect(Unit) {
-    appGraph.avdRepository.refreshDevices()
+  LaunchedEffect(sdkStatus) {
+    appGraph.avdRepository.ensureLoaded()
     appGraph.emulatorProcessManager.pollRunningEmulators()
+    if (!hasCheckedForUpdatesOnLaunch && sdkStatus is SdkStatus.Ready) {
+      hasCheckedForUpdatesOnLaunch = true
+      val updated = appGraph.sdkInstaller.checkAndInstallUpdates(silentCheckFailure = true)
+      if (updated) {
+        appGraph.avdRepository.refreshDevices()
+      }
+    }
   }
 
   if (isTraySupported) {
@@ -165,7 +174,14 @@ fun main() = application {
     ) {
       VikiTheme {
         CircuitCompositionLocals(appGraph.circuit) {
-          val backStack = rememberSaveableBackStack(root = SdkSetupScreen(allowAutoRedirect = true))
+          val initialScreen = remember {
+            if (appGraph.sdkLocator.sdkStatus.value is SdkStatus.Ready) {
+              DeviceListScreen
+            } else {
+              SdkSetupScreen(allowAutoRedirect = true)
+            }
+          }
+          val backStack = rememberSaveableBackStack(root = initialScreen)
           val navigator =
             rememberCircuitNavigator(backStack) {
               if (isTraySupported) {

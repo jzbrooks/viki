@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 data class AvdDevice(
@@ -82,14 +84,29 @@ class AvdRepository(
   private val sdkInstaller: AndroidSdkInstaller,
 ) {
   private val logger = NullLogger()
+  private val refreshMutex = Mutex()
 
   private val _devices = MutableStateFlow<List<AvdDevice>>(emptyList())
   val devices: StateFlow<List<AvdDevice>> = _devices.asStateFlow()
 
-  suspend fun refreshDevices(): List<AvdDevice> =
+  private val _hasLoaded = MutableStateFlow(false)
+  val hasLoaded: StateFlow<Boolean> = _hasLoaded.asStateFlow()
+
+  suspend fun ensureLoaded(): List<AvdDevice> {
+    if (_hasLoaded.value) return _devices.value
+    return refreshMutex.withLock {
+      if (_hasLoaded.value) return@withLock _devices.value
+      loadAndPublishDevices()
+    }
+  }
+
+  suspend fun refreshDevices(): List<AvdDevice> = refreshMutex.withLock { loadAndPublishDevices() }
+
+  private suspend fun loadAndPublishDevices(): List<AvdDevice> =
     withContext(Dispatchers.IO) {
       val parsed = loadAvdsFromDirectory(platformDetector.current.avdHomeDir)
       _devices.value = parsed
+      _hasLoaded.value = true
       parsed
     }
 

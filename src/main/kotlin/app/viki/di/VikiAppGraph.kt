@@ -2,6 +2,7 @@ package app.viki.di
 
 import app.viki.avd.AvdRepository
 import app.viki.avd.EmulatorProcessManager
+import app.viki.sdk.AndroidSdkInstaller
 import app.viki.sdk.AndroidSdkLocator
 import com.slack.circuit.foundation.Circuit
 import com.slack.circuit.runtime.presenter.Presenter
@@ -20,6 +21,7 @@ interface VikiAppGraph {
   val avdRepository: AvdRepository
   val emulatorProcessManager: EmulatorProcessManager
   val sdkLocator: AndroidSdkLocator
+  val sdkInstaller: AndroidSdkInstaller
 
   @Provides @SingleIn(AppScope::class) fun provideAppCoroutineScope(): CoroutineScope = MainScope()
 

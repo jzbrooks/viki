@@ -24,6 +24,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,6 +45,7 @@ import app.viki.di.AppScope
 import app.viki.resources.Res
 import app.viki.resources.add
 import app.viki.resources.close
+import app.viki.resources.cloud_download
 import app.viki.resources.devices_fold
 import app.viki.resources.error
 import app.viki.resources.folder
@@ -161,6 +163,110 @@ fun DeviceListUi(
       }
     }
 
+    // Background SDK Update Progress / Error Banner
+    val updateProgress = state.sdkUpdateProgress
+    if (updateProgress != null) {
+      Surface(
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+      ) {
+        Column(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              Icon(
+                imageVector = vectorResource(Res.drawable.cloud_download),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
+              )
+              Text(
+                text = updateProgress.stageTitle,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
+              )
+              Text(
+                text = updateProgress.detailMessage,
+                style =
+                  MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+            if (updateProgress.fraction != null) {
+              Text(
+                text = "${(updateProgress.fraction * 100).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+              )
+            }
+          }
+          if (updateProgress.fraction != null) {
+            LinearProgressIndicator(
+              progress = { updateProgress.fraction },
+              modifier = Modifier.fillMaxWidth(),
+            )
+          } else {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+          }
+        }
+      }
+    }
+
+    if (state.sdkUpdateError != null) {
+      Surface(
+        color = StudioError.copy(alpha = 0.12f),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, StudioError.copy(alpha = 0.5f)),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Icon(
+            imageVector = vectorResource(Res.drawable.error),
+            contentDescription = null,
+            tint = StudioError,
+            modifier = Modifier.size(16.dp),
+          )
+          Text(
+            text = state.sdkUpdateError,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+          )
+          IconButton(
+            onClick = { state.eventSink(DeviceListScreen.Event.DismissSdkUpdateError) },
+            modifier = Modifier.size(24.dp),
+          ) {
+            Icon(
+              imageVector = vectorResource(Res.drawable.close),
+              contentDescription = "Dismiss SDK update error",
+              modifier = Modifier.size(14.dp),
+            )
+          }
+        }
+      }
+    }
+
     // Search & Form Factor Filter Bar
     Row(
       modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 14.dp),
@@ -222,15 +328,19 @@ fun DeviceListUi(
 
     // Main Content Area
     if (state.devices.isEmpty()) {
-      EmptyDevicesView(
-        hasAnyInstalled = state.totalDeviceCount > 0,
-        onCreateClick = { state.eventSink(DeviceListScreen.Event.CreateDeviceClicked) },
-        onClearFiltersClick = {
-          state.eventSink(DeviceListScreen.Event.SearchQueryChanged(""))
-          state.eventSink(DeviceListScreen.Event.FormFactorFilterSelected(null))
-        },
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-      )
+      if (!state.isLoading) {
+        EmptyDevicesView(
+          hasAnyInstalled = state.totalDeviceCount > 0,
+          onCreateClick = { state.eventSink(DeviceListScreen.Event.CreateDeviceClicked) },
+          onClearFiltersClick = {
+            state.eventSink(DeviceListScreen.Event.SearchQueryChanged(""))
+            state.eventSink(DeviceListScreen.Event.FormFactorFilterSelected(null))
+          },
+          modifier = Modifier.fillMaxSize().padding(24.dp),
+        )
+      } else {
+        Box(modifier = Modifier.fillMaxSize())
+      }
     } else {
       // Table Column Headers (Android Studio Device Manager style)
       Surface(

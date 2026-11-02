@@ -13,6 +13,7 @@ import app.viki.avd.DeviceFormFactor
 import app.viki.avd.EmulatorProcessManager
 import app.viki.avd.EmulatorRunStatus
 import app.viki.di.AppScope
+import app.viki.sdk.AndroidSdkInstaller
 import app.viki.sdk.AndroidSdkLocator
 import app.viki.sdk.HostPlatformDetector
 import app.viki.sdk.SdkStatus
@@ -31,23 +32,29 @@ fun DeviceListPresenter(
   navigator: Navigator,
   platformDetector: HostPlatformDetector,
   sdkLocator: AndroidSdkLocator,
+  sdkInstaller: AndroidSdkInstaller,
   avdRepository: AvdRepository,
   emulatorManager: EmulatorProcessManager,
 ): DeviceListScreen.State {
   val sdkStatus by sdkLocator.sdkStatus.collectAsState()
+  val sdkUpdateProgress by sdkInstaller.updateProgress.collectAsState()
+  val sdkUpdateError by sdkInstaller.updateError.collectAsState()
   val avdList by avdRepository.devices.collectAsState()
+  val hasLoadedAvds by avdRepository.hasLoaded.collectAsState()
   val emulatorStates by emulatorManager.states.collectAsState()
   val scope = rememberCoroutineScope()
 
   var searchQuery by remember { mutableStateOf("") }
   var selectedFormFactor by remember { mutableStateOf<DeviceFormFactor?>(null) }
-  var isLoading by remember { mutableStateOf(false) }
+  var isRefreshing by remember { mutableStateOf(false) }
 
   LaunchedEffect(Unit) {
-    isLoading = true
-    avdRepository.refreshDevices()
+    if (!avdRepository.hasLoaded.value) {
+      isRefreshing = true
+      avdRepository.ensureLoaded()
+      isRefreshing = false
+    }
     emulatorManager.pollRunningEmulators()
-    isLoading = false
   }
 
   val sdkPath =
@@ -88,7 +95,9 @@ fun DeviceListPresenter(
     selectedFormFactorFilter = selectedFormFactor,
     devices = filteredRows,
     totalDeviceCount = avdList.size,
-    isLoading = isLoading,
+    isLoading = !hasLoadedAvds || isRefreshing,
+    sdkUpdateProgress = sdkUpdateProgress,
+    sdkUpdateError = sdkUpdateError,
   ) { event ->
     when (event) {
       is DeviceListScreen.Event.SearchQueryChanged -> {
@@ -111,12 +120,16 @@ fun DeviceListPresenter(
         emulatorManager.clearError(event.avdId)
       }
 
+      DeviceListScreen.Event.DismissSdkUpdateError -> {
+        sdkInstaller.dismissUpdateError()
+      }
+
       DeviceListScreen.Event.RefreshClicked -> {
         scope.launch {
-          isLoading = true
+          isRefreshing = true
           avdRepository.refreshDevices()
           emulatorManager.pollRunningEmulators()
-          isLoading = false
+          isRefreshing = false
         }
       }
 

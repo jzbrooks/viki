@@ -34,6 +34,8 @@ data class SdkSetupScreen(val allowAutoRedirect: Boolean = true) : Screen {
   sealed interface Event : CircuitUiEvent {
     data object InstallOrRepairClicked : Event
 
+    data object CheckForUpdatesClicked : Event
+
     data class CustomPathSelected(val path: String) : Event
 
     data object ReScanClicked : Event
@@ -66,6 +68,8 @@ data object DeviceListScreen : Screen {
     val devices: List<DeviceRowItem>,
     val totalDeviceCount: Int,
     val isLoading: Boolean,
+    val sdkUpdateProgress: SdkInstallProgress? = null,
+    val sdkUpdateError: String? = null,
     val eventSink: (Event) -> Unit,
   ) : CircuitUiState
 
@@ -79,6 +83,8 @@ data object DeviceListScreen : Screen {
     data class StopDevice(val avdId: String) : Event
 
     data class DismissDeviceError(val avdId: String) : Event
+
+    data object DismissSdkUpdateError : Event
 
     data object RefreshClicked : Event
 

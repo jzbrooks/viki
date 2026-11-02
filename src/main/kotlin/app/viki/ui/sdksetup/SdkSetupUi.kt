@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +23,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,6 +41,7 @@ import app.viki.di.AppScope
 import app.viki.resources.Res
 import app.viki.resources.android
 import app.viki.resources.check_circle
+import app.viki.resources.close
 import app.viki.resources.cloud_download
 import app.viki.resources.error
 import app.viki.resources.folder_open
@@ -63,13 +66,15 @@ fun SdkSetupUi(
   state: SdkSetupScreen.State,
   modifier: Modifier = Modifier,
 ) {
+  val isInstalling = state.installProgress != null
+
   Box(
     modifier =
       modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(32.dp),
     contentAlignment = Alignment.Center,
   ) {
     Card(
-      modifier = Modifier.widthIn(max = 680.dp).fillMaxWidth(),
+      modifier = Modifier.widthIn(max = 760.dp).fillMaxWidth(),
       colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
       border = BorderStroke(1.dp, StudioBorder),
     ) {
@@ -79,6 +84,7 @@ fun SdkSetupUi(
       ) {
         // Header
         Row(
+          modifier = Modifier.fillMaxWidth(),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -96,7 +102,7 @@ fun SdkSetupUi(
               modifier = Modifier.size(30.dp),
             )
           }
-          Column {
+          Column(modifier = Modifier.weight(1f)) {
             Text(
               text = "Welcome to Viki Virtual Device Studio",
               style = MaterialTheme.typography.headlineMedium,
@@ -107,6 +113,18 @@ fun SdkSetupUi(
               style = MaterialTheme.typography.bodyMedium,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+          }
+          if (state.canDismiss) {
+            IconButton(
+              onClick = { state.eventSink(SdkSetupScreen.Event.ContinueToDevicesClicked) },
+              enabled = !isInstalling,
+            ) {
+              Icon(
+                imageVector = vectorResource(Res.drawable.close),
+                contentDescription = "Close",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
           }
         }
 
@@ -310,11 +328,10 @@ fun SdkSetupUi(
         }
 
         // Action Buttons
-        val isInstalling = state.installProgress != null
-        Row(
+        FlowRow(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-          verticalAlignment = Alignment.CenterVertically,
+          verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
           OutlinedButton(
             onClick = {
@@ -347,6 +364,19 @@ fun SdkSetupUi(
           }
 
           if (state.isReady) {
+            OutlinedButton(
+              onClick = { state.eventSink(SdkSetupScreen.Event.CheckForUpdatesClicked) },
+              enabled = !isInstalling,
+            ) {
+              Icon(
+                imageVector = vectorResource(Res.drawable.cloud_download),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Check for Updates")
+            }
+
             Button(
               onClick = { state.eventSink(SdkSetupScreen.Event.ContinueToDevicesClicked) },
               enabled = !isInstalling,
