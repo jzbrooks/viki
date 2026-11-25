@@ -40,6 +40,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.Assumptions.assumeFalse
 
 class VikiTests {
 
@@ -55,7 +56,7 @@ class VikiTests {
       )
     assertEquals(OsFamily.MACOS, macArm.osFamily)
     assertEquals(CpuArch.ARM64, macArm.cpuArch)
-    assertEquals("/Users/designer/Library/Android/sdk", macArm.defaultSdkRoot.toString())
+    assertEquals(Path.of("/Users/designer/Library/Android/sdk"), macArm.defaultSdkRoot)
 
     val linuxX64 =
       detector.detect(
@@ -65,7 +66,80 @@ class VikiTests {
       )
     assertEquals(OsFamily.LINUX, linuxX64.osFamily)
     assertEquals(CpuArch.X86_64, linuxX64.cpuArch)
-    assertEquals("/home/designer/Android/Sdk", linuxX64.defaultSdkRoot.toString())
+    assertEquals(Path.of("/home/designer/Android/Sdk"), linuxX64.defaultSdkRoot)
+  }
+
+  @Test
+  fun `HostPlatformInfo follows Windows conventions and Android environment variables`() {
+    fun windows(vararg env: Pair<String, String>) =
+      HostPlatformDetector()
+        .detect("Windows 11", "amd64", "/Users/designer", envProvider = mapOf(*env)::get)
+
+    val home = Path.of("/Users/designer")
+    assertEquals(OsFamily.WINDOWS, windows().osFamily)
+    assertEquals("adb.exe", windows().executableName("adb"))
+    assertEquals(home.resolve("AppData/Local/Android/Sdk"), windows().defaultSdkRoot)
+    assertEquals(
+      Path.of("/local/Android/Sdk"),
+      windows("LOCALAPPDATA" to "/local").defaultSdkRoot,
+    )
+    assertTrue(
+      Path.of("/pf86/Android/android-sdk") in
+        windows("ProgramFiles(x86)" to "/pf86").commonSdkCandidatePaths
+    )
+
+    // Quoted, blank, and unrepresentable values
+    assertEquals(Path.of("/sdk"), windows("ANDROID_HOME" to "\"/sdk\"").envPath("ANDROID_HOME"))
+    assertNull(windows("ANDROID_HOME" to " ").envPath("ANDROID_HOME"))
+    assertNull(windows("ANDROID_HOME" to "bad\u0000path").envPath("ANDROID_HOME"))
+
+    // AVD home precedence
+    assertEquals(home.resolve(".android/avd"), windows().avdHomeDir)
+    assertEquals(
+      Path.of("/sdkhome/.android/avd"),
+      windows("ANDROID_PREFS_ROOT" to "", "ANDROID_SDK_HOME" to "/sdkhome").avdHomeDir,
+    )
+    val userHome = "ANDROID_USER_HOME" to "/user"
+    val emulatorHome = "ANDROID_EMULATOR_HOME" to "/emu"
+    assertEquals(Path.of("/user/avd"), windows(userHome).avdHomeDir)
+    assertEquals(Path.of("/emu/avd"), windows(userHome, emulatorHome).avdHomeDir)
+    assertEquals(
+      Path.of("/avds"),
+      windows(userHome, emulatorHome, "ANDROID_AVD_HOME" to "/avds").avdHomeDir,
+    )
+  }
+
+  @Test
+  fun `AndroidSdkLocator does not offer to repair an SDK it cannot write to`() {
+    val tempHome = Files.createTempDirectory("viki-test-readonly-home")
+    val sdk = tempHome.resolve("system-sdk")
+    try {
+      val detector =
+        HostPlatformDetector(
+          HostPlatformDetector()
+            .detect(
+              userHomeProp = tempHome.toString(),
+              envProvider = mapOf("ANDROID_HOME" to sdk.toString())::get,
+            )
+        )
+      val adb = detector.current.executableName("adb")
+      Files.createDirectories(sdk.resolve("platform-tools"))
+      Files.writeString(sdk.resolve("platform-tools").resolve(adb), "")
+      val writable = AndroidSdkLocator(detector).sdkStatus.value
+      // A complete SDK in a machine-wide location takes precedence
+      assumeFalse(writable is SdkStatus.Ready)
+      assertEquals(sdk, (writable as SdkStatus.Incomplete).tools.sdkRoot)
+
+      sdk.toFile().setWritable(false)
+      // Windows directories and root ignore the flag
+      assumeFalse(Files.isWritable(sdk))
+      // Another SDK on this machine may still be found, but never this one
+      val readOnly = AndroidSdkLocator(detector).sdkStatus.value
+      assertFalse(readOnly is SdkStatus.Incomplete && readOnly.tools.sdkRoot == sdk)
+    } finally {
+      sdk.toFile().setWritable(true)
+      tempHome.toFile().deleteRecursively()
+    }
   }
 
   @Test
@@ -99,11 +173,15 @@ class VikiTests {
       assertTrue(completeInspection.isComplete)
       assertTrue(completeInspection.missingComponents.isEmpty())
 
-      val detected =
-        locator.detectSdk(
-          envProvider = { key -> if (key == "ANDROID_HOME") tempSdk.toString() else null }
+      val envDetector =
+        HostPlatformDetector(
+          detector.detect(
+            userHomeProp = tempSdk.resolve("no-home").toString(),
+            envProvider = mapOf("ANDROID_HOME" to tempSdk.toString())::get,
+          )
         )
-      assertTrue(detected is SdkStatus.Ready)
+      val detected = AndroidSdkLocator(envDetector).detectSdk()
+      assertEquals(tempSdk, (detected as SdkStatus.Ready).tools.sdkRoot)
     } finally {
       tempSdk.toFile().deleteRecursively()
     }

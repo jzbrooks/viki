@@ -24,6 +24,7 @@ circuit-test = { module = "com.slack.circuit:circuit-test", version.ref = "circu
 
 android-sdklib = { module = "com.android.tools:sdklib", version.ref = "android-tools" }
 android-common = { module = "com.android.tools:common", version.ref = "android-tools" }
+android-analytics-shared = { module = "com.android.tools.analytics-library:shared", version.ref = "android-tools" }
 adblib = { module = "com.android.tools.adblib:adblib", version.ref = "adblib" }
 adblib-tools = { module = "com.android.tools.adblib:adblib-tools", version.ref = "adblib" }
 

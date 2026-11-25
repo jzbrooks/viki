@@ -9,6 +9,7 @@ import java.util.Properties
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
+import kotlin.io.path.isWritable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -90,19 +91,15 @@ class AndroidSdkLocator(private val platformDetector: HostPlatformDetector) {
     return status
   }
 
-  fun detectSdk(envProvider: (String) -> String? = System::getenv): SdkStatus {
+  fun detectSdk(): SdkStatus {
     val platform = platformDetector.current
     val candidates = mutableListOf<Pair<Path, String>>()
 
     loadPreferredSdkPath()?.let { saved -> candidates.add(saved to "Saved Viki setting") }
 
-    envProvider("ANDROID_HOME")
-      ?.takeIf { it.isNotBlank() }
-      ?.let { candidates.add(Paths.get(it) to "ANDROID_HOME") }
-
-    envProvider("ANDROID_SDK_ROOT")
-      ?.takeIf { it.isNotBlank() }
-      ?.let { candidates.add(Paths.get(it) to "ANDROID_SDK_ROOT") }
+    for (name in listOf("ANDROID_HOME", "ANDROID_SDK_ROOT")) {
+      platform.envPath(name)?.let { candidates.add(it to name) }
+    }
 
     for (commonPath in platform.commonSdkCandidatePaths) {
       candidates.add(commonPath to "Standard ${platform.osFamily.displayName} location")
@@ -120,11 +117,12 @@ class AndroidSdkLocator(private val platformDetector: HostPlatformDetector) {
       }
     }
 
-    // 2. Otherwise check if any candidate has at least one SDK tool already present
+    // 2. Otherwise check if any candidate has at least one SDK tool already present. Skip roots we
+    // can't install into, such as a distro-packaged /usr/lib/android-sdk.
     for ((candidatePath, source) in distinctCandidates) {
       if (candidatePath.exists() && candidatePath.isDirectory()) {
         val tools = inspectSdkRoot(candidatePath)
-        if (tools.hasEmulator || tools.hasPlatformTools) {
+        if ((tools.hasEmulator || tools.hasPlatformTools) && candidatePath.isWritable()) {
           return SdkStatus.Incomplete(tools, source)
         }
       }
