@@ -1,6 +1,8 @@
 package app.viki.sdk
 
 import app.viki.di.AppScope
+import com.android.tools.analytics.CommonMetricsData
+import com.google.wireless.android.sdk.stats.ProductDetails
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import java.nio.file.Path
@@ -29,18 +31,26 @@ data class HostPlatformInfo(
   val userHome: Path,
   private val envProvider: (String) -> String? = System::getenv,
 ) {
+  /** The value of an environment variable, treating blank as unset. */
+  fun env(name: String): String? = envProvider(name)?.takeIf { it.isNotBlank() }
+
+  /**
+   * An environment variable as a path. Tolerates the quotes that `set VAR="C:\..."` leaves in the
+   * value on Windows, and treats values the filesystem can't represent as unset.
+   */
+  fun envPath(name: String): Path? =
+    env(name)
+      ?.trim()
+      ?.trim('"')
+      ?.takeIf { it.isNotBlank() }
+      ?.let { runCatching { Paths.get(it) }.getOrNull() }
+
   val defaultSdkRoot: Path
     get() =
       when (osFamily) {
         OsFamily.MACOS -> userHome.resolve("Library/Android/sdk")
-        OsFamily.WINDOWS -> {
-          val localAppData = envProvider("LOCALAPPDATA")
-          if (!localAppData.isNullOrBlank()) {
-            Paths.get(localAppData, "Android", "Sdk")
-          } else {
-            userHome.resolve("AppData/Local/Android/Sdk")
-          }
-        }
+        OsFamily.WINDOWS ->
+          (envPath("LOCALAPPDATA") ?: userHome.resolve("AppData/Local")).resolve("Android/Sdk")
         OsFamily.LINUX -> userHome.resolve("Android/Sdk")
       }
 
@@ -57,6 +67,8 @@ data class HostPlatformInfo(
         OsFamily.WINDOWS -> {
           add(userHome.resolve("AppData/Local/Android/Sdk"))
           add(Paths.get("C:\\Android\\sdk"))
+          // Visual Studio / .NET default
+          envPath("ProgramFiles(x86)")?.let { add(it.resolve("Android/android-sdk")) }
         }
         OsFamily.LINUX -> {
           add(userHome.resolve("Android/sdk"))
@@ -69,25 +81,23 @@ data class HostPlatformInfo(
       .distinct()
 
   /**
-   * Where the emulator looks for AVDs. sdklib's `AndroidLocationsSingleton` also honors
-   * `XDG_CONFIG_HOME`, which the emulator does not, so we resolve this ourselves.
+   * Where the emulator looks for AVDs. sdklib's `AndroidLocationsSingleton` ignores
+   * `ANDROID_EMULATOR_HOME`, and falls back to a legacy `XDG_CONFIG_HOME/.android` the emulator
+   * never reads, so we resolve this ourselves.
    */
   val avdHomeDir: Path
     get() {
-      val envAvdHome = envProvider("ANDROID_AVD_HOME")
-      if (!envAvdHome.isNullOrBlank()) return Paths.get(envAvdHome)
-      val envUserHome = envProvider("ANDROID_USER_HOME")
-      if (!envUserHome.isNullOrBlank()) return Paths.get(envUserHome).resolve("avd")
-      val envPrefsRoot = envProvider("ANDROID_PREFS_ROOT") ?: envProvider("ANDROID_SDK_HOME")
-      if (!envPrefsRoot.isNullOrBlank()) {
-        val candidate = Paths.get(envPrefsRoot)
-        return if (candidate.fileName?.toString() == ".android") {
-          candidate.resolve("avd")
-        } else {
-          candidate.resolve(".android/avd")
-        }
+      envPath("ANDROID_AVD_HOME")?.let {
+        return it
       }
-      return userHome.resolve(".android/avd")
+      val dotAndroid =
+        envPath("ANDROID_EMULATOR_HOME")
+          ?: envPath("ANDROID_USER_HOME")
+          ?: (envPath("ANDROID_PREFS_ROOT") ?: envPath("ANDROID_SDK_HOME"))?.let {
+            if (it.fileName?.toString() == ".android") it else it.resolve(".android")
+          }
+          ?: userHome.resolve(".android")
+      return dotAndroid.resolve("avd")
     }
 
   val vikiConfigDir: Path
@@ -114,7 +124,7 @@ class HostPlatformDetector() {
 
   fun detect(
     osNameProp: String = System.getProperty("os.name", "generic"),
-    osArchProp: String = System.getProperty("os.arch", "x86_64"),
+    osArchProp: String = hostArch(),
     userHomeProp: String = System.getProperty("user.home", "."),
     envProvider: (String) -> String? = System::getenv,
   ): HostPlatformInfo {
@@ -140,4 +150,12 @@ class HostPlatformDetector() {
       envProvider = envProvider,
     )
   }
+
+  /**
+   * `os.arch` is the JVM's architecture. Under Rosetta or Windows-on-ARM emulation that differs
+   * from the host's, which is what sdklib uses to choose an emulator build, so ask sdklib.
+   */
+  private fun hostArch(): String =
+    if (CommonMetricsData.osArchitecture == ProductDetails.CpuArchitecture.X86_ON_ARM) "aarch64"
+    else System.getProperty("os.arch", "x86_64")
 }

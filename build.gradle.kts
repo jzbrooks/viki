@@ -50,6 +50,7 @@ dependencies {
 
   implementation(libs.android.sdklib)
   implementation(libs.android.common)
+  implementation(libs.android.analytics.shared)
   implementation(libs.adblib)
   implementation(libs.adblib.tools)
   implementation(libs.kotlinx.io.core)

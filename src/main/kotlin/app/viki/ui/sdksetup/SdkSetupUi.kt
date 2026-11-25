@@ -421,6 +421,7 @@ private fun chooseDirectoryWithSwing(
         dialogTitle = "Select Android SDK Directory"
         fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
         isAcceptAllFileFilterUsed = false
+        isFileHidingEnabled = false // the default SDK is under hidden AppData on Windows
       }
     val result = chooser.showOpenDialog(null)
     if (result == JFileChooser.APPROVE_OPTION && chooser.selectedFile != null) {

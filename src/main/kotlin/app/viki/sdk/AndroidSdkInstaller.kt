@@ -13,9 +13,11 @@ import com.android.sdklib.repository.legacy.LegacyDownloader
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
+import kotlin.io.path.isWritable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -89,6 +91,8 @@ class AndroidSdkInstaller(private val sdkLocator: AndroidSdkLocator) {
     try {
       val status = sdkLocator.sdkStatus.value
       val sdkRoot = (status as? SdkStatus.Ready)?.tools?.sdkRoot ?: return false
+      // System-managed SDKs (/opt, Nix, ...) are updated by whoever owns them.
+      if (silentCheckFailure && !sdkRoot.isWritable()) return false
       if (!silentCheckFailure) {
         updateError.value = null
       }
@@ -224,7 +228,9 @@ class AndroidSdkInstaller(private val sdkLocator: AndroidSdkLocator) {
 
       remote.license?.setAccepted(normalizedRoot)
       val installer = BasicInstallerFactory().createInstaller(remote, repoManager, downloader)
-      check(installer.prepare(progress) && installer.complete(progress)) {
+      val prepared = installer.prepare(progress)
+      if (prepared && pkg.path == "platform-tools") stopAdbServer(normalizedRoot)
+      check(prepared && installer.complete(progress)) {
         lastError ?: "Failed to update ${pkg.path}"
       }
     }
@@ -236,6 +242,19 @@ class AndroidSdkInstaller(private val sdkLocator: AndroidSdkLocator) {
     send(SdkInstallProgress(updateStageTitle, "Updated $updatedNames", 1.0f))
   }
     .flowOn(Dispatchers.IO)
+
+  /** Windows can't replace a running adb.exe. The server is restarted when Viki reconnects. */
+  private fun stopAdbServer(sdkRoot: Path) {
+    val adbBin = sdkLocator.inspectSdkRoot(sdkRoot).adbBin ?: return
+    runCatching {
+      val proc =
+        ProcessBuilder(adbBin.toString(), "kill-server")
+          .redirectErrorStream(true)
+          .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+          .start()
+      if (!proc.waitFor(10, TimeUnit.SECONDS)) proc.destroyForcibly()
+    }
+  }
 
   /**
    * Installs or repairs the Android SDK at [targetSdkRoot] so that `platform-tools` and `emulator`
@@ -357,7 +376,10 @@ class AndroidSdkInstaller(private val sdkLocator: AndroidSdkLocator) {
       progress.setFraction(0.0)
       val remote =
         remotePackages[packageId]
-          ?: error("$packageId is not available from Google's SDK repository")
+          ?: error(
+            "$packageId is not available from Google's SDK repository for " +
+              "${System.getProperty("os.name")} (${System.getProperty("os.arch")})"
+          )
       remote.license?.setAccepted(sdkRoot)
       val installer = BasicInstallerFactory().createInstaller(remote, repoManager, downloader)
       check(installer.prepare(progress) && installer.complete(progress)) {

@@ -62,7 +62,9 @@ class EmulatorProcessManager(
 
   private val adbSession: AdbSession by lazy {
     val host = AdbSessionHost()
-    AdbSession.create(host, AdbServerChannelProvider.createOpenLocalHost(host))
+    // adblib ignores ANDROID_ADB_SERVER_PORT, but the adb binary we start the server with doesn't.
+    val port = platformDetector.current.env("ANDROID_ADB_SERVER_PORT")?.toIntOrNull() ?: 5037
+    AdbSession.create(host, AdbServerChannelProvider.createOpenLocalHost(host) { port })
   }
 
   /** Online emulator serials, pushed by the adb server. */
@@ -156,7 +158,7 @@ class EmulatorProcessManager(
           val exitCode =
             withContext(Dispatchers.IO) {
               runCatching {
-                process.inputStream.bufferedReader().useLines { lines ->
+                process.inputReader().useLines { lines ->
                   lines.forEach { line ->
                     val trimmed = line.trim()
                     if (trimmed.isNotEmpty()) {
@@ -168,8 +170,9 @@ class EmulatorProcessManager(
               }
               process.waitFor()
             }
-          spawnedProcesses.remove(avdId, process)
-          if (exitCode != 0) {
+          // stopAvd already removed it if the user asked for this exit
+          val exitedOnItsOwn = spawnedProcesses.remove(avdId, process)
+          if (exitedOnItsOwn && exitCode != 0) {
             val errorSummary =
               logLines.lastOrNull {
                 it.contains("ERROR", ignoreCase = true) || it.contains("FATAL", ignoreCase = true)
@@ -192,15 +195,13 @@ class EmulatorProcessManager(
       }
 
   suspend fun stopAvd(avdId: String): Result<Unit> = runCatching {
-    _states.value[avdId]?.adbSerial?.let { serial ->
-      runCatching { withEmulatorConsole(serial) { it.kill() } }
-    }
+    val shutdownRequested =
+      _states.value[avdId]?.adbSerial?.let { serial ->
+        runCatching { withEmulatorConsole(serial) { it.kill() } }.isSuccess
+      } ?: false
 
-    spawnedProcesses.remove(avdId)?.let { proc ->
-      if (proc.isAlive) {
-        proc.destroy()
-      }
-    }
+    // destroy() is a hard kill on Windows and would interrupt a graceful snapshot save
+    spawnedProcesses.remove(avdId)?.let { proc -> if (!shutdownRequested) proc.destroy() }
 
     delay(500.milliseconds)
     pollRunningEmulators()
